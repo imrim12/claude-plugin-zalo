@@ -1,0 +1,25 @@
+{
+  "name": "claude-plugin-zalo",
+  "version": "0.0.1",
+  "description": "Zalo bridge plugin for Claude Code",
+  "type": "module",
+  "scripts": {
+    "start": "bun server.ts",
+    "test": "bun test",
+    "lint": "oxlint --deny-warnings .",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.7.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zca-js": "^2.1.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.14",
+    "oxlint": "^1.69.0"
+  }
+}

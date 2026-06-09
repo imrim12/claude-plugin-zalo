@@ -1,0 +1,13 @@
+{
+  "name": "imrim12",
+  "owner": {
+    "name": "Nguyen Huu Nguyen Y",
+    "email": "nguyenhuunguyeny.ny@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "zalo",
+      "source": "./"
+    }
+  ]
+}

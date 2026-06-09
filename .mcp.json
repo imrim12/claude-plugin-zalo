@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "zalo": {
+      "command": "bun",
+      "args": ["server.ts"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

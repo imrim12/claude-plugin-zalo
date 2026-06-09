@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "zalo",
+  "version": "0.0.1",
+  "description": "Send and receive Zalo messages from Claude Code",
+  "author": {
+    "name": "Nguyen Huu Nguyen Y",
+    "email": "nguyenhuunguyeny.ny@gmail.com"
+  },
+  "skills": [
+    "./skills/auth",
+    "./skills/configure",
+    "./skills/access",
+    "./skills/status"
+  ]
+}
