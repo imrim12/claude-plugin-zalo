@@ -17,7 +17,7 @@ your own identity — this is your **personal** Zalo account, driven over a WebS
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) ≥ 1.2
+- [Bun](https://bun.sh) ≥ 1.2 — must be on your `PATH`; works on Windows, Linux, and macOS
 - A Zalo personal account
 
 ## Install
@@ -36,6 +36,12 @@ Verify it loaded:
 claude plugin list   # should show: zalo  ✔ loaded
 ```
 
+The MCP server runs straight from npm via `bunx claude-plugin-zalo` — Bun fetches the package
+and its dependencies on first launch and caches them, so there's no manual `install` step and
+nothing OS-specific to configure. State lives under your home directory
+(`~/.claude/channels/zalo`), resolved cross-platform, independent of where Claude Code is
+launched from.
+
 ## Enable inbound delivery (required)
 
 Claude Code only renders `notifications/claude/channel` events from plugins on Anthropic's
@@ -43,7 +49,11 @@ Claude Code only renders `notifications/claude/channel` events from plugins on A
 dropped unless you launch the session with the development-channels flag:
 
 ```sh
-claude --dangerously-load-development-channels plugin:zalo@zalo
+claude --dangerously-load-development-channels plugin:imrim12@zalo
+
+# Or YOLO mode
+
+claude --dangerously-load-development-channels plugin:imrim12@zalo --dangerously-skip-permissions
 ```
 
 A confirmation dialog appears at startup — accept it. Without this flag, **everything else
@@ -56,7 +66,7 @@ your project (`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-
 Windows) for:
 
 ```
-Channel notifications skipped: plugin zalo@zalo is not on the approved channels allowlist
+Channel notifications skipped: plugin imrim12@zalo is not on the approved channels allowlist
 ```
 
 ## Quick start
@@ -165,3 +175,16 @@ pnpm lint        # oxlint --deny-warnings
 bun test         # MCP protocol tests (spawned against a temp state dir)
 pnpm start       # bun server.ts
 ```
+
+## Publishing
+
+The plugin's `.mcp.json` launches the server with `bunx claude-plugin-zalo`, so the package
+must be on npm for installs to resolve. To publish a new version:
+
+```sh
+npm version <patch|minor|major>   # also bump .claude-plugin/plugin.json to match
+npm publish                       # .npmignore controls what ships
+```
+
+`npm pack --dry-run` previews the tarball — it should contain `src/`, `server.ts`, `skills/`,
+`.claude-plugin/`, `.mcp.json`, `README.md`, and `LICENSE`, and nothing else.

@@ -13,18 +13,30 @@ Access control is pairing-code based: strangers get a code, the user approves wi
 `/zalo:access pair <code>` — all state in `~/.claude/channels/zalo/access.json`, managed by
 skills editing JSON directly (no MCP tools mutate access).
 
+## Distribution
+
+Published to npm as `claude-plugin-zalo`. The plugin's `.mcp.json` launches the server with
+`bunx --bun claude-plugin-zalo` — Bun fetches the package + deps from npm and caches them, so a
+fresh install needs no `bun install` step (Claude Code does not auto-install plugin deps). The
+`bin` is `./server.ts`; Bun runs the TypeScript directly. The server is cwd-independent (all
+state resolves from `homedir()`), so the absence of a `cwd` in `.mcp.json` is intentional.
+`.npmignore` keeps the tarball to `src/`, `server.ts`, `skills/`, `.claude-plugin/`,
+`.mcp.json`, `README.md`, `LICENSE`, `package.json` — dev tooling (`.agents/`, `.claude/`,
+`tests/`, configs, lockfiles, `CLAUDE.md`) is excluded. Keep `package.json` and
+`.claude-plugin/plugin.json` versions in lockstep when publishing.
+
 ## Inbound delivery requires a client-side flag
 
 Claude Code only renders channel notifications from plugins on Anthropic's approved channels
 allowlist (a remotely-served ledger). This plugin is not on it. Sessions must be launched with:
 
 ```
-claude --dangerously-load-development-channels plugin:zalo@zalo
+claude --dangerously-load-development-channels plugin:imrim12@zalo
 ```
 
 Without it the client silently drops inbound notifications — the gate, typing indicator, and
 outbound tools all still work, which makes the failure look like a server bug. Diagnose via
-the client log line `Channel notifications skipped: plugin zalo@zalo is not on the approved
+the client log line `Channel notifications skipped: plugin imrim12@zalo is not on the approved
 channels allowlist` in `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`.
 
 ## How to run and verify

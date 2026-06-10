@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "zalo": {
-      "command": "bun",
-      "args": ["server.ts"],
-      "cwd": "${workspaceFolder}"
+      "command": "bunx",
+      "args": ["--bun", "claude-plugin-zalo"]
     }
   }
 }

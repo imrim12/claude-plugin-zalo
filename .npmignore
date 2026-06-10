@@ -1,0 +1,35 @@
+# What ships to npm is the runtime server + the Claude plugin manifest/skills.
+# Everything below is dev-only, agent tooling, or local state.
+
+# Agent / editor / VCS tooling
+.agents/
+.claude/
+.git/
+.github/
+.vscode/
+.idea/
+
+# Tests and test runtime
+tests/
+bunfig.toml
+
+# Dev configs and lockfiles (consumers resolve deps themselves)
+tsconfig.json
+bun.lock
+skills-lock.json
+.gitignore
+.npmignore
+
+# Agent context (not needed at runtime)
+CLAUDE.md
+
+# Parked / generated
+server-legacy.ts
+dist/
+build/
+out/
+coverage/
+*.log
+*.pid
+qr-login.png
+inbox/

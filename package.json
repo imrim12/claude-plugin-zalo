@@ -1,17 +1,39 @@
 {
   "name": "claude-plugin-zalo",
-  "version": "0.0.1",
-  "description": "Zalo bridge plugin for Claude Code",
+  "version": "0.0.2",
+  "description": "Zalo channels for Claude Code — receive and reply to Zalo messages live in your Claude session",
   "type": "module",
+  "bin": {
+    "claude-plugin-zalo": "./server.ts"
+  },
   "scripts": {
     "start": "bun server.ts",
     "test": "bun test",
     "lint": "oxlint --deny-warnings .",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "zalo",
+    "claude",
+    "claude-code",
+    "mcp",
+    "plugin",
+    "messaging",
+    "zca-js"
+  ],
+  "author": "Nguyen Huu Nguyen Y <nguyenhuunguyeny.ny@gmail.com>",
   "license": "MIT",
+  "homepage": "https://github.com/imrim12/claude-plugin-zalo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imrim12/claude-plugin-zalo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/imrim12/claude-plugin-zalo/issues"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
   "packageManager": "pnpm@10.7.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

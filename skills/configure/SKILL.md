@@ -20,7 +20,7 @@ Arguments passed: `$ARGUMENTS`
    was launched with:
 
    ```
-   claude --dangerously-load-development-channels plugin:zalo@zalo
+   claude --dangerously-load-development-channels plugin:imrim12@zalo
    ```
 
    Without it, Claude Code silently drops inbound messages (the plugin is not on the
