@@ -74,7 +74,7 @@ Channel notifications skipped: plugin imrim12@zalo is not on the approved channe
 ### 1. Log in (personal account)
 
 1. Run `/zalo:auth` (or call the `zalo_login` tool).
-2. Scan the QR code that appears at `~/.claude/channels/zalo/qr-login.png` with the Zalo mobile app (More → QR scan).
+2. Scan the QR code at the path `/zalo:auth` reports (`qr-login.png` in the state directory) with the Zalo mobile app (More → QR scan).
 3. Confirm on your phone. Credentials are saved automatically — no re-scan needed on restart.
 
 ### 2. Pair your other account
@@ -110,7 +110,7 @@ Manage everything else with `/zalo:access` — `allow <id>`, `remove <id>`, `den
 | `zalo_login` | Start the QR login flow; writes the QR image and returns its path |
 
 Access control has no MCP tools — it's managed entirely by the `/zalo:access` skill editing
-`~/.claude/channels/zalo/access.json`. This keeps access mutations out of reach of prompt
+`access.json` in the state directory. This keeps access mutations out of reach of prompt
 injection arriving through channel messages.
 
 ## Skills
@@ -126,17 +126,38 @@ injection arriving through channel messages.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `ZALO_STATE_DIR` | No | Override the state directory (default `~/.claude/channels/zalo`) |
+| `ZALO_STATE_DIR` | No | Force a specific state directory, overriding the resolution below |
 | `ZALO_ACCESS_MODE=static` | No | Snapshot access at boot; never re-read or written (pairing downgrades to allowlist) |
+
+## State directory
+
+State lives under a `.claude/channels/zalo` directory, split into two scopes:
+
+**Authentication (account-global) — always `~/.claude/channels/zalo`:**
+
+- `credentials.json` — your Zalo session, and `qr-login.png` — the QR login image. The account
+  is global, so one QR scan works across every project. `ZALO_STATE_DIR` overrides this location.
+
+**Chat state (per session) — resolved in this order:**
+
+1. **`ZALO_STATE_DIR`** if set — used verbatim.
+2. **`<project>/.claude/channels/zalo`** — when the project you launched Claude Code in already
+   contains a `.claude/` folder. This keeps Zalo chat state scoped to that project. The plugin
+   only *adopts* an existing `.claude/`; it never creates one.
+3. **`~/.claude/channels/zalo`** — the default, used when the project has no `.claude/`.
+
+The channel server (via the `CLAUDE_PROJECT_DIR` it's given) and the `/zalo:*` skills resolve
+both scopes the same way, so they always read and write the same files.
 
 ## State files
 
-All under `~/.claude/channels/zalo/` (mode `0600`, atomic writes):
+`credentials.json` and `qr-login.png` are under the user-root dir; everything else is under the
+resolved chat-state directory (mode `0600`, atomic writes):
 
-- `credentials.json` — Zalo session: imei, userAgent, cookie jar (rotated and re-saved on every login)
+- `credentials.json` — Zalo session: imei, userAgent, cookie jar (rotated and re-saved on every login) — **user-root**
+- `qr-login.png` — last QR login code — **user-root**
 - `access.json` — `dmPolicy`, `allowFrom`, `groups`, `pending` pairings, delivery/UX config
 - `approved/<senderId>` — touch-files dropped by `/zalo:access pair`; the server polls, DMs "Paired!", and removes them
-- `qr-login.png` — last QR login code
 - `inbox/` — downloaded attachment bytes
 - `bot.pid` — current connection owner (last session wins)
 

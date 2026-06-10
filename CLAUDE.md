@@ -82,12 +82,22 @@ state dir while a session is live.
 
 ## State files
 
-Path: `~/.claude/channels/zalo/` (`ZALO_STATE_DIR` overrides) — writes atomic (tmp+rename), mode `0o600`.
+`src/paths.ts` keeps two roots. `HOME_STATE_DIR` is the user-root `~/.claude/channels/zalo`
+and holds the authentication files (`credentials.json`, `qr-login.png`) — the Zalo account is
+global, so one login works across every project. `STATE_DIR` holds per-session chat state and is
+resolved in this order: (1)
+`ZALO_STATE_DIR` verbatim; (2) `<CLAUDE_PROJECT_DIR>/.claude/channels/zalo` when the session's
+project root already has a `.claude/` folder (adopt-only — never created); (3)
+`~/.claude/channels/zalo`. Claude Code exports `CLAUDE_PROJECT_DIR` into every MCP server's env,
+which is how the server learns the project root; the `/zalo:*` skills mirror the same rule so
+skill and server share one set of files. When `ZALO_STATE_DIR` is set, both roots collapse to it
+(keeps tests off the real home dir). Writes are atomic (tmp+rename), mode `0o600`.
 
-- `credentials.json` — `{ imei, userAgent, cookie, language? }`; re-persisted after every login (Zalo rotates cookies)
-- `access.json` — `{ dmPolicy, allowFrom, groups, pending, mentionPatterns?, ackReaction?, replyToMode?, textChunkLimit?, chunkMode? }`
-- `approved/<senderId>` — touch-files from `/zalo:access pair`; polled every 5s, confirmed with a "Paired!" DM, removed
-- `qr-login.png`, `inbox/`, `bot.pid`
+- `credentials.json` — **user-root** (`HOME_STATE_DIR`); `{ imei, userAgent, cookie, language? }`, re-persisted after every login (Zalo rotates cookies)
+- `qr-login.png` — **user-root** (`HOME_STATE_DIR`); QR login image
+- `access.json` — `STATE_DIR`; `{ dmPolicy, allowFrom, groups, pending, mentionPatterns?, ackReaction?, replyToMode?, textChunkLimit?, chunkMode? }`
+- `approved/<senderId>` — `STATE_DIR`; touch-files from `/zalo:access pair`; polled every 5s, confirmed with a "Paired!" DM, removed
+- `inbox/`, `bot.pid` — `STATE_DIR`
 
 ## MCP tools (4)
 

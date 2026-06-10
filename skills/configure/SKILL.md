@@ -5,16 +5,22 @@ description: Set up the Zalo channel — check login, review access policy, lock
 
 # /zalo:configure — Zalo Channel Setup
 
-Orients the user on login state and access policy. Login uses QR (the /zalo:auth skill);
-access state lives in `~/.claude/channels/zalo/access.json`.
+Orients the user on login state and access policy. Login uses QR (the /zalo:auth skill).
+
+**Two locations.** Login credentials are account-global and always live at
+`~/.claude/channels/zalo/credentials.json`. Per-session chat state (access policy, pairings)
+lives in the resolved `<state>` dir: if `$ZALO_STATE_DIR` is set, use it; else if the project
+root (where Claude Code was launched) has a `.claude/` folder, use `<project>/.claude/channels/zalo`;
+else use `~/.claude/channels/zalo`. The server uses the same rules, so you read the files it
+writes. All `<state>/…` paths below are relative to the resolved chat-state dir.
 
 Arguments passed: `$ARGUMENTS`
 
 ## Status and guidance (always)
 
-1. **Login** — check whether `~/.claude/channels/zalo/credentials.json` exists. If not, the
-   next step is `/zalo:auth` (QR scan). Stop there — access policy means nothing while
-   logged out.
+1. **Login** — check whether `~/.claude/channels/zalo/credentials.json` exists (credentials are
+   user-root, not project-local). If not, the next step is `/zalo:auth` (QR scan). Stop there —
+   access policy means nothing while logged out.
 
 2. **Inbound delivery** — channel notifications from this plugin only render if Claude Code
    was launched with:
@@ -27,7 +33,7 @@ Arguments passed: `$ARGUMENTS`
    built-in approved-channels allowlist). Tell the user — outbound tools working is NOT
    evidence inbound is enabled.
 
-3. **Access** — read `~/.claude/channels/zalo/access.json` (missing = defaults:
+3. **Access** — read `<state>/access.json` (missing = defaults:
    `dmPolicy: "pairing"`, empty allowlist). Show:
    - DM policy and what it means in one line
    - Allowed senders: count and ids

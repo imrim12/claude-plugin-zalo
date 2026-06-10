@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const PROJECT_ROOT = path.resolve(import.meta.dir, "..");
@@ -161,4 +162,44 @@ describe("MCP protocol", () => {
     expect(result.isError).toBe(true);
     expect(toolText(resp)).toContain("unknown tool");
   });
+});
+
+// ── State-dir resolution ────────────────────────────────────────────────────
+
+describe("state dir resolution", () => {
+  // Spawns a server with ZALO_STATE_DIR REMOVED and CLAUDE_PROJECT_DIR pointing
+  // at a temp project that already contains a `.claude/` folder. The server
+  // must write its state under <project>/.claude/channels/zalo — never the real
+  // home dir. (A temp project WITHOUT `.claude` would fall back to ~/.claude, so
+  // we always create `.claude` first to keep the test off the real state dir.)
+  test("a project-local .claude is adopted over the home dir", async () => {
+    const projectDir = mkdtempSync(path.join(os.tmpdir(), "zalo-proj-"));
+    mkdirSync(path.join(projectDir, ".claude"), { recursive: true });
+
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    delete env.ZALO_STATE_DIR;
+    env.CLAUDE_PROJECT_DIR = projectDir;
+
+    const child = Bun.spawn(["bun", "server.ts"], {
+      cwd: PROJECT_ROOT,
+      env,
+      stdin: "pipe",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+
+    const pidFile = path.join(projectDir, ".claude", "channels", "zalo", "bot.pid");
+    try {
+      // The server writes bot.pid at boot; poll briefly for it to appear.
+      let written: string | undefined;
+      for (let i = 0; i < 50 && written === undefined; i++) {
+        try { written = readFileSync(pidFile, "utf8"); } catch { await Bun.sleep(100); }
+      }
+      expect(written).toBe(String(child.pid));
+    } finally {
+      child.kill();
+      await child.exited;
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  }, 15_000);
 });

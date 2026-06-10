@@ -3,12 +3,23 @@ name: status
 description: Check the current status of the Zalo plugin and its subsystems. Use when the user says "Zalo status", "is Zalo connected", "check Zalo", or to diagnose connection issues.
 ---
 
-There is no status MCP tool — diagnose from state files and logs. State dir:
-`~/.claude/channels/zalo/` (`ZALO_STATE_DIR` overrides).
+There is no status MCP tool — diagnose from state files and logs.
 
-1. **Login** — does `credentials.json` exist in the state dir? Missing → not logged in,
-   suggest `/zalo:auth`. Present → cookie login is attempted at boot (it can still be stale;
-   the server stderr says `cookie login failed` if so).
+**Two locations.** Authentication (login credentials and the QR image) is account-global and
+always lives in `~/.claude/channels/zalo/` (`credentials.json`, `qr-login.png`). Per-session
+chat state (access policy, pairings, inbox, pid) lives in the resolved `<state>` dir (the
+channel server uses the same rule, so you read the same files it writes):
+1. If `$ZALO_STATE_DIR` is set, use it.
+2. Else if a `.claude/` directory exists in the project root (where Claude Code was launched),
+   use `<project>/.claude/channels/zalo`.
+3. Else use `~/.claude/channels/zalo`.
+
+Paths below are relative to the resolved chat-state dir, except `credentials.json` and
+`qr-login.png` (user-root).
+
+1. **Login** — does `~/.claude/channels/zalo/credentials.json` exist (user-root, shared across
+   projects)? Missing → not logged in, suggest `/zalo:auth`. Present → cookie login is attempted
+   at boot (it can still be stale; the server stderr says `cookie login failed` if so).
 
 2. **Owner** — read `bot.pid`. That process holds the Zalo listener (last session wins).
 
