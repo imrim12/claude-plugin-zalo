@@ -31,12 +31,12 @@ Paths below are relative to the resolved chat-state dir, except `credentials.jso
    allowlist; this plugin needs the session launched with:
 
    ```
-   claude --dangerously-load-development-channels plugin:imrim12@zalo
+   claude --dangerously-load-development-channels plugin:zalo@imrim12
    ```
 
    To confirm a drop, check the newest file in Claude Code's MCP log dir for the current
    project (`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\` on
-   Windows) for a line like `Channel notifications skipped: plugin imrim12@zalo is not on the
+   Windows) for a line like `Channel notifications skipped: plugin zalo@imrim12 is not on the
    approved channels allowlist`. Server-side stderr lines (`zalo channel: ...`) in the same
    file show login, listener, and kick events.
 

@@ -31,12 +31,12 @@ Claude Code only renders channel notifications from plugins on Anthropic's appro
 allowlist (a remotely-served ledger). This plugin is not on it. Sessions must be launched with:
 
 ```
-claude --dangerously-load-development-channels plugin:imrim12@zalo
+claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
 Without it the client silently drops inbound notifications — the gate, typing indicator, and
 outbound tools all still work, which makes the failure look like a server bug. Diagnose via
-the client log line `Channel notifications skipped: plugin imrim12@zalo is not on the approved
+the client log line `Channel notifications skipped: plugin zalo@imrim12 is not on the approved
 channels allowlist` in `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`.
 
 ## How to run and verify

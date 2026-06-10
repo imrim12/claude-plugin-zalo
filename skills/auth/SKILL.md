@@ -19,7 +19,7 @@ message, or check that `~/.claude/channels/zalo/credentials.json` now exists.
 After login, remind the user: **inbound** messages only render in the session if Claude Code was launched with channel delivery enabled for this plugin:
 
 ```
-claude --dangerously-load-development-channels plugin:imrim12@zalo
+claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
 Without it, outbound tools work but incoming Zalo messages are silently dropped by Claude Code (the plugin is not on the built-in approved-channels allowlist).

@@ -27,7 +27,7 @@ your own identity — this is your **personal** Zalo account, driven over a WebS
 claude plugin marketplace add imrim12/claude-plugin-zalo
 
 # Install
-claude plugin install zalo
+claude plugin install zalo@imrim12
 ```
 
 Verify it loaded:
@@ -49,11 +49,11 @@ Claude Code only renders `notifications/claude/channel` events from plugins on A
 dropped unless you launch the session with the development-channels flag:
 
 ```sh
-claude --dangerously-load-development-channels plugin:imrim12@zalo
+claude --dangerously-load-development-channels plugin:zalo@imrim12
 
 # Or YOLO mode
 
-claude --dangerously-load-development-channels plugin:imrim12@zalo --dangerously-skip-permissions
+claude --dangerously-load-development-channels plugin:zalo@imrim12 --dangerously-skip-permissions
 ```
 
 A confirmation dialog appears at startup — accept it. Without this flag, **everything else
@@ -66,7 +66,7 @@ your project (`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-
 Windows) for:
 
 ```
-Channel notifications skipped: plugin imrim12@zalo is not on the approved channels allowlist
+Channel notifications skipped: plugin zalo@imrim12 is not on the approved channels allowlist
 ```
 
 ## Quick start
