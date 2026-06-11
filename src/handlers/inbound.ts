@@ -120,7 +120,7 @@ export async function handleInbound(message: Message): Promise<void> {
         thread_type: message.type === ThreadType.Group ? 'group' : 'user',
         // should_reply=false tells Claude to record this to memory and stay
         // silent (an unmentioned group message it's observing as secretary).
-        should_reply: respond,
+        should_reply: String(respond),
         ...(msgId ? { message_id: msgId } : {}),
         user,
         user_id: message.data.uidFrom,
