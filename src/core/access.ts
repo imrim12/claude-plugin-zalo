@@ -3,8 +3,8 @@
 // tool mutates access; that keeps mutations out of reach of prompt injection
 // via channel messages).
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
-import { STATE_DIR, ACCESS_FILE, STATIC } from './paths.ts'
-import { log } from './log.ts'
+import { STATE_DIR, ACCESS_FILE, STATIC } from '../constants/paths.ts'
+import { log } from '../utils/log.ts'
 
 export type PendingEntry = {
   senderId: string

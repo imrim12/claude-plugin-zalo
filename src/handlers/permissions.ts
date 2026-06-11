@@ -3,10 +3,10 @@
 // through the inbound handler and is emitted as a structured permission event.
 import { z } from 'zod'
 import { ThreadType, Reactions, type Message } from 'zca-js'
-import { mcp } from './mcp.ts'
-import { loadAccess } from './access.ts'
-import { getApi } from './session.ts'
-import { log } from './log.ts'
+import { mcp } from '../core/mcp.ts'
+import { loadAccess } from '../core/access.ts'
+import { getApi } from '../channels/user/session.ts'
+import { log } from '../utils/log.ts'
 
 // Permission-reply spec from anthropics/claude-cli-internal
 // src/services/mcp/channelPermissions.ts — inlined (no CC repo dep).

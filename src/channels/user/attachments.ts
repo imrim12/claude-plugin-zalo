@@ -3,7 +3,7 @@
 import { writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import type { Message, TMessage } from 'zca-js'
-import { INBOX_DIR } from './paths.ts'
+import { INBOX_DIR } from '../../constants/paths.ts'
 import { getApi } from './session.ts'
 
 export function attachmentKind(msgType: string): string | undefined {

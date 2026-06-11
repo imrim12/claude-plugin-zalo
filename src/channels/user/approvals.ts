@@ -4,9 +4,9 @@
 import { readdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { ThreadType } from 'zca-js'
-import { APPROVED_DIR, STATIC } from './paths.ts'
+import { APPROVED_DIR, STATIC } from '../../constants/paths.ts'
 import { getApi } from './session.ts'
-import { log } from './log.ts'
+import { log } from '../../utils/log.ts'
 
 function checkApprovals(): void {
   const api = getApi()

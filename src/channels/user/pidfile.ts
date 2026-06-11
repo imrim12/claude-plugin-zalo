@@ -3,8 +3,8 @@
 // orphan holding the slot — every new session then gets kicked with
 // DuplicateConnection. Kill any stale holder before we start listening.
 import { readFileSync, writeFileSync, rmSync } from 'fs'
-import { PID_FILE } from './paths.ts'
-import { log } from './log.ts'
+import { PID_FILE } from '../../constants/paths.ts'
+import { log } from '../../utils/log.ts'
 
 export function takeOverPidFile(): void {
   try {

@@ -1,12 +1,12 @@
 // Inbound message pipeline: hard self-filter → cache → gate → pairing
 // auto-reply OR deliver to the session as a channel notification.
 import { ThreadType, type Message } from 'zca-js'
-import { mcp } from './mcp.ts'
-import { getApi } from './session.ts'
-import { gate } from './gate.ts'
-import { cacheMessage } from './message-cache.ts'
+import { mcp } from '../core/mcp.ts'
+import { getApi } from '../channels/user/session.ts'
+import { gate } from '../channels/user/gate.ts'
+import { cacheMessage } from '../channels/user/message-cache.ts'
 import { tryHandlePermissionReply } from './permissions.ts'
-import { toReaction } from './reactions.ts'
+import { toReaction } from '../channels/user/reactions.ts'
 import {
   attachmentKind,
   attachmentHref,
@@ -15,8 +15,8 @@ import {
   extFor,
   messageText,
   safeName,
-} from './attachments.ts'
-import { log } from './log.ts'
+} from '../channels/user/attachments.ts'
+import { log } from '../utils/log.ts'
 
 // Pairing auto-replies must never answer something that itself looks like a
 // pairing instruction — two plugin instances DMing each other would ping-pong

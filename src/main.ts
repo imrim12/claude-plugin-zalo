@@ -25,19 +25,19 @@
  *   permissions.ts     — permission request/reply relay
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { mcp } from './mcp.ts'
-import { registerTools } from './tools.ts'
-import { registerPermissionRelay } from './permissions.ts'
-import { handleInbound } from './inbound.ts'
+import { mcp } from './core/mcp.ts'
+import { registerTools } from './handlers/tools.ts'
+import { registerPermissionRelay } from './handlers/permissions.ts'
+import { handleInbound } from './handlers/inbound.ts'
 import {
   setInboundHandler,
   cookieLogin,
   isShuttingDown,
   markShuttingDown,
-} from './session.ts'
-import { startApprovalPolling } from './approvals.ts'
-import { takeOverPidFile, releasePidFile } from './pidfile.ts'
-import { log } from './log.ts'
+} from './channels/user/session.ts'
+import { startApprovalPolling } from './channels/user/approvals.ts'
+import { takeOverPidFile, releasePidFile } from './channels/user/pidfile.ts'
+import { log } from './utils/log.ts'
 
 takeOverPidFile()
 

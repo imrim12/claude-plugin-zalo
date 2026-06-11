@@ -58,26 +58,37 @@ state dir while a session is live.
 
 ## Source layout
 
+`src/` is layered so a second channel (`channels/oa`, coming soon) can reuse everything
+outside `channels/`. Dependency direction is one-way: `constants → utils → core → channels →
+handlers → main`. `core/` never imports a channel; channel-specific message shapes (zca-js
+`Message`/`TMessage`, `Reactions`) stay inside `channels/user/`.
+
 | File | Responsibility |
 |---|---|
 | `server.ts` | Entry shim only — imports `src/main.ts`. Kept at root so `.mcp.json`, `pnpm start`, and tests keep spawning `bun server.ts`. |
 | `src/main.ts` | Wiring + process lifecycle: PID takeover, error traps, MCP connect, shutdown, orphan watchdog, boot cookie-login. |
-| `src/paths.ts` | `STATE_DIR` + file path constants, `STATIC` flag, state-dir mkdir (module side effect). |
-| `src/log.ts` | `log()` — prefixed stderr writes (stdout is the MCP transport). |
-| `src/credentials.ts` | `credentials.json` load/save (atomic, 0o600, re-persisted every login). |
-| `src/access.ts` | `Access` types, `access.json` read/write, static-mode boot snapshot, `assertAllowedChat` outbound gate. |
-| `src/gate.ts` | The fail-secure inbound `gate()`: pairing codes, allowlist, group + mention policy. |
-| `src/session.ts` | Zalo client + `api`/`ownId`/`kicked`/`shuttingDown` state, `wireApi`, cookie-relogin backoff, QR login, `requireApi`. Inbound handler is injected by main (no session↔inbound import cycle). |
-| `src/inbound.ts` | `handleInbound`: self-filter → cache → gate → pairing auto-reply (`PAIRING_SHAPE_RE`) or channel notification. |
-| `src/tools.ts` | `registerTools()` — tools/list + tools/call for the 4 tools. |
-| `src/permissions.ts` | Permission-request relay to allowlisted DMs + `tryHandlePermissionReply` text intercept. |
-| `src/mcp.ts` | The `Server` instance: capabilities + model-facing instructions. |
-| `src/attachments.ts` | Attachment kind/href/title mapping, `downloadToInbox` (50MB cap), `extFor`, `messageText`, `safeName`. |
-| `src/message-cache.ts` | In-memory recent-message cache (msgId → data) for quote/react. |
-| `src/reactions.ts` | Emoji → zca `Reactions` code mapping. |
-| `src/chunk.ts` | Outbound text chunking (length/newline modes). |
-| `src/approvals.ts` | `approved/<senderId>` polling → "Paired!" DM. |
-| `src/pidfile.ts` | PID-file takeover of stale listeners + release on shutdown. |
+| **`src/constants/`** | |
+| `constants/paths.ts` | `STATE_DIR`/`HOME_STATE_DIR` + file path constants, `STATIC` flag, state-dir mkdir (module side effect). |
+| **`src/utils/`** | Channel-agnostic pure helpers. |
+| `utils/log.ts` | `log()` — prefixed stderr writes (stdout is the MCP transport). |
+| `utils/chunk.ts` | Outbound text chunking (length/newline modes). |
+| **`src/core/`** | Channel-agnostic MCP server + access policy. No imports from `channels/`. |
+| `core/mcp.ts` | The `Server` instance: capabilities + model-facing instructions. |
+| `core/access.ts` | `Access` types, `access.json` read/write, static-mode boot snapshot, `assertAllowedChat` outbound gate. |
+| **`src/handlers/`** | The MCP ↔ channel bridge: turn channel events into MCP notifications and MCP tool-calls into channel actions. |
+| `handlers/inbound.ts` | `handleInbound`: self-filter → cache → gate → pairing auto-reply (`PAIRING_SHAPE_RE`) or channel notification. |
+| `handlers/tools.ts` | `registerTools()` — tools/list + tools/call for the 4 tools. |
+| `handlers/permissions.ts` | Permission-request relay to allowlisted DMs + `tryHandlePermissionReply` text intercept. |
+| **`src/channels/user/`** | Zalo **personal** account transport (zca-js). Owns all zca-specific types. |
+| `channels/user/session.ts` | Zalo client + `api`/`ownId`/`kicked`/`shuttingDown` state, `wireApi`, cookie-relogin backoff, QR login, `requireApi`. Inbound handler is injected by main (no session↔inbound import cycle). |
+| `channels/user/credentials.ts` | `credentials.json` load/save (atomic, 0o600, re-persisted every login). |
+| `channels/user/gate.ts` | The fail-secure inbound `gate()`: pairing codes, allowlist, group + mention policy. Consumes the shared `core/access` policy. |
+| `channels/user/attachments.ts` | Attachment kind/href/title mapping, `downloadToInbox` (50MB cap), `extFor`, `messageText`, `safeName`. |
+| `channels/user/message-cache.ts` | In-memory recent-message cache (msgId → data) for quote/react. |
+| `channels/user/reactions.ts` | Emoji → zca `Reactions` code mapping. |
+| `channels/user/approvals.ts` | `approved/<senderId>` polling → "Paired!" DM. |
+| `channels/user/pidfile.ts` | PID-file takeover of stale listeners + release on shutdown. |
+| **`src/channels/oa/`** | Zalo **Official Account** transport — coming soon (see `README.md`). |
 | `skills/` | auth, configure, access, status SKILL.md docs (the four skills listed in plugin.json). |
 
 ## State files

@@ -5,7 +5,7 @@
 // still runs so zalo_login can bootstrap.
 import { readFileSync, writeFileSync, renameSync, chmodSync } from 'fs'
 import type { API, Credentials } from 'zca-js'
-import { CREDENTIALS_FILE } from './paths.ts'
+import { CREDENTIALS_FILE } from '../../constants/paths.ts'
 
 export type StoredCredentials = {
   imei: string

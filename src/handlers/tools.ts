@@ -5,13 +5,13 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { ThreadType, type SendMessageQuote } from 'zca-js'
-import { mcp } from './mcp.ts'
-import { requireApi, beginQRLogin } from './session.ts'
-import { loadAccess, assertAllowedChat, MAX_CHUNK_LIMIT } from './access.ts'
-import { chunk } from './chunk.ts'
-import { toReaction } from './reactions.ts'
-import { getCachedMessage } from './message-cache.ts'
-import { attachmentHref, downloadToInbox, extFor } from './attachments.ts'
+import { mcp } from '../core/mcp.ts'
+import { requireApi, beginQRLogin } from '../channels/user/session.ts'
+import { loadAccess, assertAllowedChat, MAX_CHUNK_LIMIT } from '../core/access.ts'
+import { chunk } from '../utils/chunk.ts'
+import { toReaction } from '../channels/user/reactions.ts'
+import { getCachedMessage } from '../channels/user/message-cache.ts'
+import { attachmentHref, downloadToInbox, extFor } from '../channels/user/attachments.ts'
 
 export function registerTools(): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({

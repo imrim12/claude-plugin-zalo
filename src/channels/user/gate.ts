@@ -3,7 +3,7 @@
 // access without terminal approval, unknown groups drop. Never weaken this.
 import { randomBytes } from 'crypto'
 import { ThreadType, type Message } from 'zca-js'
-import { loadAccess, saveAccess, pruneExpired, type Access } from './access.ts'
+import { loadAccess, saveAccess, pruneExpired, type Access } from '../../core/access.ts'
 import { getOwnId } from './session.ts'
 
 export type GateResult =

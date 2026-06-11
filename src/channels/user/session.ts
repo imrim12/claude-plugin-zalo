@@ -11,8 +11,8 @@ import {
   type Message,
 } from 'zca-js'
 import { loadCredentials, saveCredentials } from './credentials.ts'
-import { CREDENTIALS_FILE, QR_PATH } from './paths.ts'
-import { log } from './log.ts'
+import { CREDENTIALS_FILE, QR_PATH } from '../../constants/paths.ts'
+import { log } from '../../utils/log.ts'
 
 const zalo = new Zalo({ selfListen: false, checkUpdate: false, logging: false })
 
