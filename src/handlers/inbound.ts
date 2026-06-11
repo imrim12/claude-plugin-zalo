@@ -6,6 +6,7 @@ import { getApi } from '../channels/user/session.ts'
 import { gate } from '../channels/user/gate.ts'
 import { cacheMessage } from '../channels/user/message-cache.ts'
 import { tryHandlePermissionReply } from './permissions.ts'
+import { logInbound } from './transcript.ts'
 import { toReaction } from '../channels/user/reactions.ts'
 import {
   attachmentKind,
@@ -48,34 +49,40 @@ export async function handleInbound(message: Message): Promise<void> {
   }
 
   const access = result.access
+  // respond=false → observe only: deliver + log for memory, but no reply is
+  // expected (an unmentioned group message). Skip the "processing" signals.
+  const respond = result.respond
   const chat_id = message.threadId
   const msgId = message.data.msgId
 
-  // The sender is already gate()-approved at this point, so permission
-  // replies ("yes xxxxx") are trusted and intercepted instead of relayed.
-  if (tryHandlePermissionReply(text, message)) return
+  if (respond) {
+    // The sender is already gate()-approved at this point, so permission
+    // replies ("yes xxxxx") are trusted and intercepted instead of relayed.
+    if (tryHandlePermissionReply(text, message)) return
 
-  // Typing indicator — signals "processing" until we reply (or it times out).
-  void getApi()?.sendTypingEvent(chat_id, message.type).catch(() => { })
+    // Typing indicator — signals "processing" until we reply (or it times out).
+    void getApi()?.sendTypingEvent(chat_id, message.type).catch(() => { })
 
-  // Ack reaction — lets the user know we're processing. Fire-and-forget.
-  if (access.ackReaction) {
-    try {
-      void getApi()?.addReaction(toReaction(access.ackReaction), {
-        data: { msgId: message.data.msgId, cliMsgId: message.data.cliMsgId },
-        threadId: chat_id,
-        type: message.type,
-      }).catch(() => { })
-    } catch { } // unmappable configured reaction — swallow
+    // Ack reaction — lets the user know we're processing. Fire-and-forget.
+    if (access.ackReaction) {
+      try {
+        void getApi()?.addReaction(toReaction(access.ackReaction), {
+          data: { msgId: message.data.msgId, cliMsgId: message.data.cliMsgId },
+          threadId: chat_id,
+          type: message.type,
+        }).catch(() => { })
+      } catch { } // unmappable configured reaction — swallow
+    }
   }
 
-  // Photos auto-download to the inbox so Claude can Read them inline. Deferred
-  // until after the gate approves — anyone can send photos, and we don't want
-  // to burn bandwidth or fill the inbox for dropped messages.
+  // Photos auto-download to the inbox so Claude can Read them inline. Only when
+  // we're going to respond — observe-only messages don't warrant burning
+  // bandwidth or filling the inbox (the attachment_kind meta still records it,
+  // and Claude can call download_attachment if a memory note needs the bytes).
   let imagePath: string | undefined
   const kind = attachmentKind(message.data.msgType)
   const href = attachmentHref(message.data)
-  if (kind === 'photo' && href) {
+  if (respond && kind === 'photo' && href) {
     try {
       imagePath = await downloadToInbox(href, extFor(message.data), msgId)
     } catch (err) {
@@ -84,6 +91,23 @@ export async function handleInbound(message: Message): Promise<void> {
   }
 
   const ts = Number(message.data.ts)
+  const tsIso = Number.isFinite(ts) ? new Date(ts).toISOString() : new Date().toISOString()
+  const user = safeName(message.data.dName) ?? message.data.uidFrom
+  const attachmentDesc = kind
+    ? (attachmentTitle(message.data) ? `${kind}: ${safeName(attachmentTitle(message.data))}` : kind)
+    : undefined
+
+  // Deterministic transcript — every delivered message, responded or observed.
+  logInbound({
+    chatId: chat_id,
+    threadType: message.type === ThreadType.Group ? 'group' : 'user',
+    user,
+    userId: message.data.uidFrom,
+    text,
+    ts: tsIso,
+    responded: respond,
+    attachment: attachmentDesc,
+  })
 
   // image_path goes in meta only — an in-content "[image attached — read: PATH]"
   // annotation is forgeable by any allowlisted sender typing that string.
@@ -94,10 +118,13 @@ export async function handleInbound(message: Message): Promise<void> {
       meta: {
         chat_id,
         thread_type: message.type === ThreadType.Group ? 'group' : 'user',
+        // should_reply=false tells Claude to record this to memory and stay
+        // silent (an unmentioned group message it's observing as secretary).
+        should_reply: respond,
         ...(msgId ? { message_id: msgId } : {}),
-        user: safeName(message.data.dName) ?? message.data.uidFrom,
+        user,
         user_id: message.data.uidFrom,
-        ts: Number.isFinite(ts) ? new Date(ts).toISOString() : new Date().toISOString(),
+        ts: tsIso,
         ...(imagePath ? { image_path: imagePath } : {}),
         ...(kind && kind !== 'photo' && href ? {
           attachment_kind: kind,

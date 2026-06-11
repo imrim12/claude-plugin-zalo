@@ -137,9 +137,10 @@ skill and server share one set of files. When `ZALO_STATE_DIR` is set, both root
 
 - `credentials.json` — **user-root** (`HOME_STATE_DIR`); `{ imei, userAgent, cookie, language? }`, re-persisted after every login (Zalo rotates cookies)
 - `qr-login.png` — **user-root** (`HOME_STATE_DIR`); QR login image
-- `access.json` — `STATE_DIR`; `{ dmPolicy, allowFrom, groups, pending, mentionPatterns?, ackReaction?, replyToMode?, textChunkLimit?, chunkMode? }`
+- `access.json` — `STATE_DIR`; `{ dmPolicy, allowFrom, groups, pending, mentionPatterns?, ackReaction?, replyToMode?, textChunkLimit?, chunkMode? }`. Each `groups[id]` is `{ requireMention, allowFrom, observe? }` — `observe:false` mutes a group persistently.
 - `approved/<senderId>` — `STATE_DIR`; touch-files from `/zalo:access pair`; polled every 5s, confirmed with a "Paired!" DM, removed
 - `inbox/`, `bot.pid` — `STATE_DIR`
+- `<chat_id>.md` transcripts — **`MEMORY_DIR/zalo`** (project-local `.claude/memory/zalo`, NOT `STATE_DIR`; resolved with the same adopt-only rule, collapses under `ZALO_STATE_DIR` for tests). The server appends one line per delivered message (responded or observed) as the deterministic half of the secretary log; Claude keeps summarized notes alongside. Created lazily on first write.
 
 ## MCP tools (4)
 
@@ -152,9 +153,17 @@ skill and server share one set of files. When `ZALO_STATE_DIR` is set, both root
 
 ## Key invariants
 
-- **The gate is fail-secure.** `disabled` drops everything; `allowlist` requires an explicit
-  `allowFrom` entry; `pairing` never grants access without terminal approval. Unknown groups
-  drop. Never weaken `gate()`.
+- **The gate is fail-secure for DMs.** `disabled` drops everything; `allowlist` requires an
+  explicit `allowFrom` entry; `pairing` never grants access without terminal approval. Never
+  weaken the DM paths.
+- **Groups are open-but-observe-only by design** (deliberate, user-chosen — *not* a hole to
+  "fix"). An unknown group is auto-registered (`{requireMention:true, allowFrom:[], observe:true}`)
+  and every message is delivered + logged so the secretary remembers it; the gate returns
+  `respond=false` for unmentioned group messages so Claude records but doesn't reply. `disabled`
+  still kills groups too; `observe:false` mutes one group; an explicit per-group `allowFrom`
+  hard-drops outside senders. `respond` flows to inbound (gates typing/ack/photo-download) and to
+  the `should_reply` notification meta. Auto-registration is why outbound replies to a mentioned
+  group pass `assertAllowedChat`.
 - **`message.isSelf || uidFrom === "0"` hard filter** — never remove. Without it, pairing mode
   auto-replies codes to everyone the user messages from their phone.
 - **Pairing-shaped inbound never gets pairing replies** (`PAIRING_SHAPE_RE`) — two plugin

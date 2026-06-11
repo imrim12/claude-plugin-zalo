@@ -17,6 +17,9 @@ export type PendingEntry = {
 export type GroupPolicy = {
   requireMention: boolean
   allowFrom: string[]
+  /** Observe (deliver + log) messages from this group. Default true. Set false
+   *  to mute a group persistently so auto-registration won't re-enable it. */
+  observe?: boolean
 }
 
 export type Access = {

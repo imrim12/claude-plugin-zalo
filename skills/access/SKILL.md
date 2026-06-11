@@ -36,7 +36,7 @@ Arguments passed: `$ARGUMENTS`
   "dmPolicy": "pairing",
   "allowFrom": ["<zaloUserId>"],
   "groups": {
-    "<groupThreadId>": { "requireMention": true, "allowFrom": [] }
+    "<groupThreadId>": { "requireMention": true, "allowFrom": [], "observe": true }
   },
   "pending": {
     "<6-hex-code>": {
@@ -48,6 +48,14 @@ Arguments passed: `$ARGUMENTS`
 ```
 
 Missing file = `{dmPolicy:"pairing", allowFrom:[], groups:{}, pending:{}}`.
+
+**Groups are observed by default.** The server auto-registers any group the user is added to
+with `{ requireMention: true, allowFrom: [], observe: true }` on the first message it sees. That
+means every group message is delivered to the session and logged to memory, but the secretary
+only *replies* when the user is @mentioned (or a message quote-replies one of their messages).
+`observe: false` mutes a group: nothing from it is delivered or logged, and auto-registration
+won't re-enable it. This is intentionally more open than DM access — DMs stay fail-secure
+(pairing/allowlist), groups default-open-but-observe-only.
 
 ---
 
@@ -91,13 +99,26 @@ Validate one of `pairing`, `allowlist`, `disabled`. Read, set `dmPolicy`, write.
 ### `group add <groupThreadId>` (optional: `--no-mention`, `--allow id1,id2`)
 
 Read (create default if missing), set
-`groups[<id>] = { requireMention: !hasFlag("--no-mention"), allowFrom: parsedAllowList }`,
+`groups[<id>] = { requireMention: !hasFlag("--no-mention"), allowFrom: parsedAllowList, observe: true }`,
 write. Tip: a group's thread id is the `chat_id` shown in the inbound `<channel>` block when a
-message arrives from that group.
+message arrives from that group. Note that groups are auto-registered on first message anyway —
+use this to pre-configure mention/allowFrom policy before the first message arrives, or to flip
+`requireMention` off so the secretary answers every message in that group.
+
+### `group mute <groupThreadId>`
+
+Read, set `groups[<id>].observe = false` (create the entry if missing), write. Mutes the group:
+no messages delivered or logged. Use this for a group the user does NOT want observed — plain
+`group rm` won't stick, since the next message re-registers it with `observe: true`.
+
+### `group unmute <groupThreadId>`
+
+Read, set `groups[<id>].observe = true` (or delete the entry to reset to defaults), write.
 
 ### `group rm <groupThreadId>`
 
-Read, delete the entry, write.
+Read, delete the entry, write. Note: the group will be auto-registered again (observe-on) on its
+next message — to silence it permanently use `group mute`.
 
 ---
 

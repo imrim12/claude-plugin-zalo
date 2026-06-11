@@ -48,6 +48,21 @@ function resolveStateDir(): string {
   return userRootDir()
 }
 
+// Conversation memory lives in the project's `.claude/memory` (NOT the
+// channels state dir) so it sits alongside any other project memory the user
+// keeps. Same adopt-only rule as STATE_DIR: project-local when the session has
+// a `.claude/` folder, else the user root. ZALO_STATE_DIR collapses it for tests.
+function resolveMemoryDir(): string {
+  if (process.env.ZALO_STATE_DIR) return join(process.env.ZALO_STATE_DIR, 'memory')
+
+  const projectDir = process.env.CLAUDE_PROJECT_DIR
+  if (projectDir && isDir(join(projectDir, '.claude'))) {
+    return join(projectDir, '.claude', 'memory')
+  }
+
+  return join(homedir(), '.claude', 'memory')
+}
+
 export const HOME_STATE_DIR = resolveHomeStateDir()
 export const STATE_DIR = resolveStateDir()
 
@@ -60,6 +75,12 @@ export const ACCESS_FILE = join(STATE_DIR, 'access.json')
 export const APPROVED_DIR = join(STATE_DIR, 'approved')
 export const INBOX_DIR = join(STATE_DIR, 'inbox')
 export const PID_FILE = join(STATE_DIR, 'bot.pid')
+
+// Conversation transcripts the server appends to (the deterministic half of
+// the secretary log). Created lazily on first write — never mkdir'd at boot,
+// so directories that don't receive Zalo traffic stay clean.
+export const MEMORY_DIR = resolveMemoryDir()
+export const ZALO_LOG_DIR = join(MEMORY_DIR, 'zalo')
 
 // In static mode, access is snapshotted at boot and never re-read or written.
 export const STATIC = process.env.ZALO_ACCESS_MODE === 'static'

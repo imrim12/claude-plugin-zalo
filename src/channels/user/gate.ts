@@ -1,13 +1,20 @@
-// The inbound access gate. Fail-secure: 'disabled' drops everything,
+// The inbound access gate. Fail-secure for DMs: 'disabled' drops everything,
 // 'allowlist' requires an explicit allowFrom entry, 'pairing' never grants
-// access without terminal approval, unknown groups drop. Never weaken this.
+// access without terminal approval. Never weaken the DM paths.
+//
+// Groups are deliberately OPEN by design: the secretary observes (delivers +
+// logs) every group it's in, and only `respond`s when mentioned. An unknown
+// group is auto-registered with a default mention-gated policy (so it shows up
+// in /zalo:access and outbound replies pass assertAllowedChat) rather than
+// dropped. Mute a group by setting its policy `observe: false`.
 import { randomBytes } from 'crypto'
 import { ThreadType, type Message } from 'zca-js'
-import { loadAccess, saveAccess, pruneExpired, type Access } from '../../core/access.ts'
+import { loadAccess, saveAccess, pruneExpired, type Access, type GroupPolicy } from '../../core/access.ts'
 import { getOwnId } from './session.ts'
 
 export type GateResult =
-  | { action: 'deliver'; access: Access }
+  // respond=false means "observe only": deliver + log for memory, but do not reply.
+  | { action: 'deliver'; access: Access; respond: boolean }
   | { action: 'drop' }
   | { action: 'pair'; code: string; isResend: boolean }
 
@@ -22,7 +29,7 @@ export function gate(message: Message): GateResult {
   if (!senderId) return { action: 'drop' }
 
   if (message.type === ThreadType.User) {
-    if (access.allowFrom.includes(senderId)) return { action: 'deliver', access }
+    if (access.allowFrom.includes(senderId)) return { action: 'deliver', access, respond: true }
     if (access.dmPolicy === 'allowlist') return { action: 'drop' }
 
     // pairing mode — check for existing non-expired code for this sender
@@ -53,17 +60,28 @@ export function gate(message: Message): GateResult {
 
   if (message.type === ThreadType.Group) {
     const groupId = message.threadId
-    const policy = access.groups[groupId]
-    if (!policy) return { action: 'drop' }
+    let policy: GroupPolicy | undefined = access.groups[groupId]
+    if (!policy) {
+      // First message from a group we've never seen: auto-register it so the
+      // secretary observes by default. Registering (vs. delivering ad-hoc)
+      // makes the group visible to /zalo:access and lets outbound replies pass
+      // assertAllowedChat. Default = observe all senders, reply only on mention.
+      policy = { requireMention: true, allowFrom: [], observe: true }
+      access.groups[groupId] = policy
+      saveAccess(access)
+    }
+    // Muted group — the user opted it out via /zalo:access. Drop entirely.
+    if (policy.observe === false) return { action: 'drop' }
     const groupAllowFrom = policy.allowFrom ?? []
-    const requireMention = policy.requireMention ?? true
+    // An explicit per-group allowFrom is a deliberate narrowing: senders
+    // outside it are dropped (not even logged).
     if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) {
       return { action: 'drop' }
     }
-    if (requireMention && !isMentioned(message, access.mentionPatterns)) {
-      return { action: 'drop' }
-    }
-    return { action: 'deliver', access }
+    // Observe everything; only respond when the mention policy is satisfied.
+    const requireMention = policy.requireMention ?? true
+    const respond = requireMention ? isMentioned(message, access.mentionPatterns) : true
+    return { action: 'deliver', access, respond }
   }
 
   return { action: 'drop' }
