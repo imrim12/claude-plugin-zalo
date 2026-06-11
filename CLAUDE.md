@@ -15,15 +15,44 @@ skills editing JSON directly (no MCP tools mutate access).
 
 ## Distribution
 
-Published to npm as `claude-plugin-zalo`. The plugin's `.mcp.json` launches the server with
-`bunx --bun claude-plugin-zalo` — Bun fetches the package + deps from npm and caches them, so a
-fresh install needs no `bun install` step (Claude Code does not auto-install plugin deps). The
-`bin` is `./server.ts`; Bun runs the TypeScript directly. The server is cwd-independent (all
-state resolves from `homedir()`), so the absence of a `cwd` in `.mcp.json` is intentional.
+Distributed as a Claude Code plugin via the `imrim12` marketplace (also published to npm as
+`claude-plugin-zalo`). The plugin's `.mcp.json` launches the server from the plugin's own
+installed checkout — `bun run --cwd ${CLAUDE_PLUGIN_ROOT} --shell=bun --silent start` (the same
+run model as the official Telegram channel plugin). `${CLAUDE_PLUGIN_ROOT}` is the plugin's
+install dir (the marketplace cache for an installed plugin, or the repo root under
+`--plugin-dir`); Claude Code installs plugin deps into that dir at install time, so the cached
+checkout has its own `node_modules`. `--silent` is mandatory: without it `bun run` prints
+`$ bun server.ts` to stdout and corrupts the MCP transport. `--shell=bun` keeps the `start`
+script cross-platform on Windows. The `start` script is `bun server.ts`; `bin` is also
+`./server.ts` for the npm/`bunx` path. The server is cwd-independent (all state resolves from
+`homedir()`), so `--cwd ${CLAUDE_PLUGIN_ROOT}` only anchors `bun run` to the right `package.json`.
 `.npmignore` keeps the tarball to `src/`, `server.ts`, `skills/`, `.claude-plugin/`,
 `.mcp.json`, `README.md`, `LICENSE`, `package.json` — dev tooling (`.agents/`, `.claude/`,
 `tests/`, configs, lockfiles, `CLAUDE.md`) is excluded. Keep `package.json` and
 `.claude-plugin/plugin.json` versions in lockstep when publishing.
+
+## Local development (running against this repo)
+
+To run the channel from the working tree instead of the installed `zalo@imrim12`, launch Claude
+Code from the repo with `--plugin-dir .`:
+
+```
+claude --plugin-dir . --dangerously-load-development-channels plugin:zalo
+```
+
+`--plugin-dir .` loads this repo as a plugin named `zalo` and **shadows the installed
+`zalo@imrim12` for that session** (same name → local wins), so only one instance runs — no
+fight over the single Zalo account/listener slot. Because `.mcp.json` runs
+`${CLAUDE_PLUGIN_ROOT}/start` and `CLAUDE_PLUGIN_ROOT` is now the repo, this executes the live
+local `server.ts`. Note the channel ref is **`plugin:zalo`** (no `@imrim12` suffix) — a
+`--plugin-dir` plugin has no marketplace. In other projects, omit `--plugin-dir` and the
+installed `zalo@imrim12` runs its cached stock copy as usual.
+
+The repo's `.mcp.json` is ALSO auto-discovered by Claude Code as a project-scoped MCP server
+named `zalo` — but a project server is not a plugin and can never deliver channel
+notifications (inbound is plugin-gated), and it would collide with the `--plugin-dir` plugin
+over the account slot. It is therefore disabled in `.claude/settings.local.json`
+(`disabledMcpjsonServers: ["zalo"]`). Leave it disabled; use `--plugin-dir` for development.
 
 ## Inbound delivery requires a client-side flag
 
@@ -34,10 +63,12 @@ allowlist (a remotely-served ledger). This plugin is not on it. Sessions must be
 claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
-Without it the client silently drops inbound notifications — the gate, typing indicator, and
-outbound tools all still work, which makes the failure look like a server bug. Diagnose via
-the client log line `Channel notifications skipped: plugin zalo@imrim12 is not on the approved
-channels allowlist` in `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`.
+(When developing against this repo with `--plugin-dir .`, the ref is `plugin:zalo` instead —
+see **Local development** below.) Without the flag the client silently drops inbound
+notifications — the gate, typing indicator, and outbound tools all still work, which makes the
+failure look like a server bug. Diagnose via the client log line `Channel notifications
+skipped: plugin zalo@imrim12 is not on the approved channels allowlist` in
+`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`.
 
 ## How to run and verify
 

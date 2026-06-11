@@ -1,6 +1,6 @@
 {
   "name": "claude-plugin-zalo",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Zalo channels for Claude Code — receive and reply to Zalo messages live in your Claude session",
   "type": "module",
   "bin": {
