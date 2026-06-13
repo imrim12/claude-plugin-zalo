@@ -137,7 +137,7 @@ handlers → {daemon, proxy}`. `core/` never imports a channel; channel-specific
 | `channels/user/approvals.ts` | `approved/<senderId>` polling → "Paired!" DM (runs in the daemon). |
 | `hooks/` | Optional PostToolUse hook (`mark-processed.ts` + `hooks.json`) — belt-and-suspenders watermark mark-processed. |
 | **`src/channels/oa/`** | Zalo **Official Account** transport — coming soon (see `README.md`). |
-| `skills/` | auth, configure, access, status SKILL.md docs (the four skills listed in plugin.json). |
+| `skills/` | auth, configure, access, status, uninstall SKILL.md docs (the five skills listed in plugin.json). `uninstall` is the full teardown: stops the daemon (PID from `daemon.lock`), deletes the Scheduled Task, wipes `HOME_STATE_DIR` + memory, then defers plugin removal to `/plugin`. |
 
 ## State files
 

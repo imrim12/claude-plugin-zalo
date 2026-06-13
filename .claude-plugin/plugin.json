@@ -12,6 +12,7 @@
     "./skills/auth",
     "./skills/configure",
     "./skills/access",
-    "./skills/status"
+    "./skills/status",
+    "./skills/uninstall"
   ]
 }
