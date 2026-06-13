@@ -3,15 +3,18 @@
 // wiring, the QR login bootstrap, and a stand-down on kick (another session
 // taking the slot must win — fighting it would churn the cookie and log the
 // user out everywhere).
+import { appendFileSync, readFileSync, rmSync } from 'fs'
+import { join } from 'path'
 import {
   Zalo,
   CloseReason,
   LoginQRCallbackEventType,
+  ThreadType,
   type API,
   type Message,
 } from 'zca-js'
 import { loadCredentials, saveCredentials } from './credentials.ts'
-import { CREDENTIALS_FILE, QR_PATH } from '../../constants/paths.ts'
+import { CREDENTIALS_FILE, QR_PATH, HOME_STATE_DIR } from '../../constants/paths.ts'
 import { log } from '../../utils/log.ts'
 
 const zalo = new Zalo({ selfListen: false, checkUpdate: false, logging: false })
@@ -25,7 +28,7 @@ let kicked = false
 let shuttingDown = false
 let reloginAttempt = 0
 
-// Inbound handler is injected by main.ts (keeps session ↔ inbound from being
+// Inbound handler is injected by the daemon (keeps session ↔ ingest from being
 // a circular import).
 type InboundHandler = (message: Message) => Promise<void>
 let onMessage: InboundHandler | null = null
@@ -59,6 +62,17 @@ export function requireApi(): API {
   }
   if (!api) throw new Error('Zalo not logged in — run zalo_login (QR scan) first')
   return api
+}
+
+// Health surfaced to `meta.ws_state` (objection A6): a 'kicked' daemon looks
+// process-healthy but its WebSocket is dead — make that observable instead of
+// hiding it. Derived from the same api/kicked/reloginAttempt state the listener
+// callbacks maintain.
+export function getWsState(): 'connected' | 'kicked' | 'reconnecting' | 'disconnected' {
+  if (kicked) return 'kicked'
+  if (api) return 'connected'
+  if (reloginAttempt > 0) return 'reconnecting'
+  return 'disconnected'
 }
 
 function wireApi(a: API): void {
@@ -112,8 +126,52 @@ function scheduleRelogin(): void {
   setTimeout(() => { void cookieLogin() }, delay).unref()
 }
 
+// ── Test harness ────────────────────────────────────────────────────────────
+// ZALO_FAKE=1 wires a stub API instead of a real Zalo login so the daemon can be
+// integration-tested with no account. Inbound is fed by appending JSON lines to
+// <HOME_STATE_DIR>/fake-inbound.jsonl (one TMessage-shaped `data` object plus an
+// optional `__type:"group"`); outbound sends are recorded to fake-sent.jsonl.
+const FAKE = process.env.ZALO_FAKE === '1'
+
+function wireFakeApi(): void {
+  const sentLog = join(HOME_STATE_DIR, 'fake-sent.jsonl')
+  const inboundFile = join(HOME_STATE_DIR, 'fake-inbound.jsonl')
+  const fake = {
+    getOwnId: () => 'self',
+    getContext: () => ({ userAgent: 'fake-agent', imei: 'fake-imei', language: 'en' }),
+    sendMessage: async (content: unknown, threadId: string, type: unknown) => {
+      appendFileSync(sentLog, JSON.stringify({ content, threadId, type }) + '\n')
+      return { message: { msgId: Math.floor(Date.now() % 1_000_000_000) }, attachment: [] }
+    },
+    addReaction: async () => ({ msgIds: [] }),
+    sendTypingEvent: async () => ({}),
+  } as unknown as API
+  api = fake
+  ownId = 'self'
+  kicked = false
+  log('ZALO_FAKE=1 — wired stub API (no real Zalo login)')
+  setInterval(() => {
+    let raw: string
+    try { raw = readFileSync(inboundFile, 'utf8') } catch { return }
+    try { rmSync(inboundFile) } catch { }
+    for (const ln of raw.split('\n').filter(Boolean)) {
+      try {
+        const data = JSON.parse(ln) as { idTo?: string; threadId?: string; __type?: string }
+        const msg = {
+          data,
+          threadId: data.threadId ?? data.idTo ?? '',
+          type: data.__type === 'group' ? ThreadType.Group : ThreadType.User,
+          isSelf: false,
+        } as unknown as Message
+        onMessage?.(msg).catch(err => log(`fake inbound handler error: ${err}`))
+      } catch (err) { log(`fake inbound parse error: ${err}`) }
+    }
+  }, 200).unref()
+}
+
 export async function cookieLogin(): Promise<void> {
   if (shuttingDown || kicked) return
+  if (FAKE) { wireFakeApi(); return }
   const creds = loadCredentials()
   if (!creds) {
     log(`no credentials at ${CREDENTIALS_FILE} — run zalo_login (QR scan) to connect`)

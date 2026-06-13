@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_zalo_zalo__reply",
+        "hooks": [
+          { "type": "command", "command": "bun \"${CLAUDE_PLUGIN_ROOT}/hooks/mark-processed.ts\"" }
+        ]
+      }
+    ]
+  }
+}

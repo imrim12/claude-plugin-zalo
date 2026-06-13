@@ -9,6 +9,10 @@ import path from "node:path";
 // listener (and could cookie-login with real credentials).
 const tmpDir = await mkdtemp(path.join(os.tmpdir(), "zalo-test-"));
 process.env.ZALO_STATE_DIR = tmpDir;
+// Proxies spawned by tests must not fork a real detached daemon — it would
+// outlive the test and hold the temp messages.db open (breaking cleanup on
+// Windows). Tests that need a daemon spawn their own (ZALO_FAKE=1).
+process.env.ZALO_NO_DAEMON_SPAWN = "1";
 
 process.on("exit", () => {
   // Best-effort sync cleanup — async rm may not finish in exit handler,

@@ -70,11 +70,25 @@ export const STATE_DIR = resolveStateDir()
 export const CREDENTIALS_FILE = join(HOME_STATE_DIR, 'credentials.json')
 export const QR_PATH = join(HOME_STATE_DIR, 'qr-login.png')
 
-// Per-session chat state → resolved (project-local) state dir.
-export const ACCESS_FILE = join(STATE_DIR, 'access.json')
-export const APPROVED_DIR = join(STATE_DIR, 'approved')
-export const INBOX_DIR = join(STATE_DIR, 'inbox')
-export const PID_FILE = join(STATE_DIR, 'bot.pid')
+// Per-session chat state no longer exists separately — the daemon is
+// account-global, so everything that used to be per-project (access, approvals,
+// inbox) now lives at the user root alongside credentials. The per-project
+// adopt rule for access created a "whose policy wins" ambiguity (objection A9);
+// removing it makes the daemon the sole policy authority. ZALO_STATE_DIR still
+// collapses both roots for tests.
+export const ACCESS_FILE = join(HOME_STATE_DIR, 'access.json')
+export const APPROVED_DIR = join(HOME_STATE_DIR, 'approved')
+export const INBOX_DIR = join(HOME_STATE_DIR, 'inbox')
+
+// SQLite message log — canonical record + the IPC bus between the daemon
+// (single writer of inbound + outbound results) and the proxies (claim inbound,
+// enqueue outbound).
+export const DB_FILE = join(HOME_STATE_DIR, 'messages.db')
+
+// Daemon single-instance lock + log file (the daemon runs detached and must not
+// inherit a proxy's stdio — it logs to its own file instead).
+export const LOCK_FILE = join(HOME_STATE_DIR, 'daemon.lock')
+export const DAEMON_LOG = join(HOME_STATE_DIR, 'daemon.log')
 
 // Conversation transcripts the server appends to (the deterministic half of
 // the secretary log). Created lazily on first write — never mkdir'd at boot,
@@ -85,5 +99,7 @@ export const ZALO_LOG_DIR = join(MEMORY_DIR, 'zalo')
 // In static mode, access is snapshotted at boot and never re-read or written.
 export const STATIC = process.env.ZALO_ACCESS_MODE === 'static'
 
+// Only the account-global root holds files now (access, db, lock, inbox,
+// approvals, credentials). STATE_DIR is kept only as the CLAUDE_PROJECT_DIR
+// anchor for memory resolution — it never gets its own files, so don't mkdir it.
 mkdirSync(HOME_STATE_DIR, { recursive: true, mode: 0o700 })
-mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })

@@ -7,12 +7,20 @@ description: Set up the Zalo channel — check login, review access policy, lock
 
 Orients the user on login state and access policy. Login uses QR (the /zalo:auth skill).
 
-**Two locations.** Login credentials are account-global and always live at
-`~/.claude/channels/zalo/credentials.json`. Per-session chat state (access policy, pairings)
-lives in the resolved `<state>` dir: if `$ZALO_STATE_DIR` is set, use it; else if the project
-root (where Claude Code was launched) has a `.claude/` folder, use `<project>/.claude/channels/zalo`;
-else use `~/.claude/channels/zalo`. The server uses the same rules, so you read the files it
-writes. All `<state>/…` paths below are relative to the resolved chat-state dir.
+**Everything is account-global.** A single always-on daemon owns the Zalo connection and all
+state lives at `~/.claude/channels/zalo/` — credentials, `messages.db`, and `access.json`. There
+is no longer a per-project state dir (`$ZALO_STATE_DIR` overrides the root for tests). All paths
+below are under `~/.claude/channels/zalo/`.
+
+> **Migration (one-time).** Access used to be per-project. If a project still has
+> `<project>/.claude/channels/zalo/access.json`, copy it once to the account-global location —
+> only the global one is read now:
+>
+> ```
+> copy <project>\.claude\channels\zalo\access.json %USERPROFILE%\.claude\channels\zalo\access.json
+> ```
+>
+> If both exist, the account-global one wins (it's the only one read).
 
 Arguments passed: `$ARGUMENTS`
 
@@ -33,7 +41,7 @@ Arguments passed: `$ARGUMENTS`
    built-in approved-channels allowlist). Tell the user — outbound tools working is NOT
    evidence inbound is enabled.
 
-3. **Access** — read `<state>/access.json` (missing = defaults:
+3. **Access** — read `~/.claude/channels/zalo/access.json` (missing = defaults:
    `dmPolicy: "pairing"`, empty allowlist). Show:
    - DM policy and what it means in one line
    - Allowed senders: count and ids

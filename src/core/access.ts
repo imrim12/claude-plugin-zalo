@@ -3,7 +3,7 @@
 // tool mutates access; that keeps mutations out of reach of prompt injection
 // via channel messages).
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
-import { STATE_DIR, ACCESS_FILE, STATIC } from '../constants/paths.ts'
+import { HOME_STATE_DIR, ACCESS_FILE, STATIC } from '../constants/paths.ts'
 import { log } from '../utils/log.ts'
 
 export type PendingEntry = {
@@ -96,7 +96,7 @@ export function loadAccess(): Access {
 
 export function saveAccess(a: Access): void {
   if (STATIC) return
-  mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+  mkdirSync(HOME_STATE_DIR, { recursive: true, mode: 0o700 })
   const tmp = ACCESS_FILE + '.tmp'
   writeFileSync(tmp, JSON.stringify(a, null, 2) + '\n', { mode: 0o600 })
   renameSync(tmp, ACCESS_FILE)

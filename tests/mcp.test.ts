@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { readFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import os from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const PROJECT_ROOT = path.resolve(import.meta.dir, "..");
@@ -115,14 +114,17 @@ afterAll(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("MCP protocol", () => {
-  test("spawned server uses the temp state dir, not the real one", () => {
-    // Guards the env propagation above: the server writes its own pid into
-    // <state dir>/bot.pid at boot. If that file is missing from the temp dir,
-    // the server is running against the real state dir — which would have
-    // just SIGTERM'd a live session's listener.
-    const pidFile = path.join(process.env.ZALO_STATE_DIR!, "bot.pid");
-    const written = readFileSync(pidFile, "utf8");
-    expect(written).toBe(String(proc.pid));
+  test("spawned proxy uses the temp state dir, not the real one", async () => {
+    // Guards the env propagation above: the proxy opens the SQLite log at
+    // <state dir>/messages.db at boot. If that file is missing from the temp
+    // dir, the proxy is running against the REAL ~/.claude DB (and could spawn a
+    // daemon against the user's real account). Poll briefly for it to appear.
+    const dbFile = path.join(process.env.ZALO_STATE_DIR!, "messages.db");
+    let exists = false;
+    for (let i = 0; i < 50 && !exists; i++) {
+      try { readFileSync(dbFile); exists = true; } catch { await Bun.sleep(50); }
+    }
+    expect(exists).toBe(true);
   });
 
   test("tools/list returns exactly the 4 expected tools", async () => {
@@ -164,42 +166,17 @@ describe("MCP protocol", () => {
   });
 });
 
-// ── State-dir resolution ────────────────────────────────────────────────────
+// ── Account-global path resolution ──────────────────────────────────────────
 
-describe("state dir resolution", () => {
-  // Spawns a server with ZALO_STATE_DIR REMOVED and CLAUDE_PROJECT_DIR pointing
-  // at a temp project that already contains a `.claude/` folder. The server
-  // must write its state under <project>/.claude/channels/zalo — never the real
-  // home dir. (A temp project WITHOUT `.claude` would fall back to ~/.claude, so
-  // we always create `.claude` first to keep the test off the real state dir.)
-  test("a project-local .claude is adopted over the home dir", async () => {
-    const projectDir = mkdtempSync(path.join(os.tmpdir(), "zalo-proj-"));
-    mkdirSync(path.join(projectDir, ".claude"), { recursive: true });
-
-    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-    delete env.ZALO_STATE_DIR;
-    env.CLAUDE_PROJECT_DIR = projectDir;
-
-    const child = Bun.spawn(["bun", "server.ts"], {
-      cwd: PROJECT_ROOT,
-      env,
-      stdin: "pipe",
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-
-    const pidFile = path.join(projectDir, ".claude", "channels", "zalo", "bot.pid");
-    try {
-      // The server writes bot.pid at boot; poll briefly for it to appear.
-      let written: string | undefined;
-      for (let i = 0; i < 50 && written === undefined; i++) {
-        try { written = readFileSync(pidFile, "utf8"); } catch { await Bun.sleep(100); }
-      }
-      expect(written).toBe(String(child.pid));
-    } finally {
-      child.kill();
-      await child.exited;
-      rmSync(projectDir, { recursive: true, force: true });
-    }
-  }, 15_000);
+describe("path resolution", () => {
+  // Access (and the DB, lock, inbox) is now account-global: there is no more
+  // per-project adopt rule. With ZALO_STATE_DIR set, every path collapses under
+  // it — assert ACCESS_FILE resolves there, not to the real home dir.
+  test("account-global paths resolve under ZALO_STATE_DIR", async () => {
+    const { ACCESS_FILE, DB_FILE, HOME_STATE_DIR } = await import("../src/constants/paths.ts");
+    const root = process.env.ZALO_STATE_DIR!;
+    expect(HOME_STATE_DIR).toBe(root);
+    expect(ACCESS_FILE).toBe(path.join(root, "access.json"));
+    expect(DB_FILE).toBe(path.join(root, "messages.db"));
+  });
 });

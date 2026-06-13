@@ -3,15 +3,23 @@
 ## What this is
 
 An MCP plugin (stdio transport) that bridges Zalo personal-account messaging into Claude Code.
-`server.ts` is a thin entry shim; the implementation lives in `src/` (entry point
-`src/main.ts`). Inbound messages are delivered live to the interactive session as
-`notifications/claude/channel` events (rendered as `<channel source="zalo" ...>`); Claude
-replies with the `reply` tool. Replies go out under the user's own personal account — this is
-not a bot.
+**Two processes, one DB.** A single always-on **daemon** (`src/daemon.ts`) owns the Zalo
+WebSocket and a SQLite log (`messages.db`); each Claude session runs a thin **proxy**
+(`src/proxy.ts`, launched by `server.ts`) that talks to the daemon *only through the shared
+SQLite DB* (no socket). The daemon gates + writes every inbound message to SQLite; a live proxy
+atomically claims the messages that should be answered, enriches them with prior context, and
+delivers them as `notifications/claude/channel` events (rendered as `<channel source="zalo"
+...>`). Claude replies with the `reply` tool → an `outbound` queue row → the daemon sends it.
+Replies go out under the user's own personal account — this is not a bot.
+
+Only DMs and group @mentions wake the LLM; unmentioned group messages are logged to SQLite
+silently (no notification). The daemon runs 24/7 (Windows Scheduled Task), so opening/closing
+sessions never drops the connection, and N sessions coexist with exactly one answering each
+message (atomic row-claim).
 
 Access control is pairing-code based: strangers get a code, the user approves with
-`/zalo:access pair <code>` — all state in `~/.claude/channels/zalo/access.json`, managed by
-skills editing JSON directly (no MCP tools mutate access).
+`/zalo:access pair <code>` — all state in `~/.claude/channels/zalo/access.json` (account-global),
+managed by skills editing JSON directly (no MCP tools mutate access).
 
 ## Distribution
 
@@ -23,13 +31,14 @@ install dir (the marketplace cache for an installed plugin, or the repo root und
 `--plugin-dir`); Claude Code installs plugin deps into that dir at install time, so the cached
 checkout has its own `node_modules`. `--silent` is mandatory: without it `bun run` prints
 `$ bun server.ts` to stdout and corrupts the MCP transport. `--shell=bun` keeps the `start`
-script cross-platform on Windows. The `start` script is `bun server.ts`; `bin` is also
-`./server.ts` for the npm/`bunx` path. The server is cwd-independent (all state resolves from
-`homedir()`), so `--cwd ${CLAUDE_PLUGIN_ROOT}` only anchors `bun run` to the right `package.json`.
-`.npmignore` keeps the tarball to `src/`, `server.ts`, `skills/`, `.claude-plugin/`,
-`.mcp.json`, `README.md`, `LICENSE`, `package.json` — dev tooling (`.agents/`, `.claude/`,
-`tests/`, configs, lockfiles, `CLAUDE.md`) is excluded. Keep `package.json` and
-`.claude-plugin/plugin.json` versions in lockstep when publishing.
+script cross-platform on Windows. The `start` script is `bun server.ts` (which launches the proxy); `bin` is also
+`./server.ts` for the npm/`bunx` path. Both proxy and daemon are cwd-independent (all state
+resolves from `homedir()`), so `--cwd ${CLAUDE_PLUGIN_ROOT}` only anchors `bun run` to the right
+`package.json`. `.npmignore` keeps the tarball to `src/`, `server.ts`, `skills/`, `hooks/`,
+`.claude-plugin/`, `.mcp.json`, `README.md`, `LICENSE`, `package.json` — dev tooling
+(`.agents/`, `.claude/`, `tests/`, configs, lockfiles, `CLAUDE.md`) is excluded. `plugin.json`
+registers the optional PostToolUse hook via `"hooks": "./hooks/hooks.json"`. Keep `package.json`
+and `.claude-plugin/plugin.json` versions in lockstep when publishing.
 
 ## Local development (running against this repo)
 
@@ -73,105 +82,124 @@ skipped: plugin zalo@imrim12 is not on the approved channels allowlist` in
 ## How to run and verify
 
 ```sh
-bun server.ts    # stays open, speaks MCP over stdio
+bun server.ts        # the proxy — stays open, speaks MCP over stdio
+bun src/daemon.ts    # the daemon — owns Zalo + SQLite (pnpm daemon)
 
 pnpm typecheck   # must exit 0
 pnpm lint        # oxlint --deny-warnings; must exit 0
-bun test         # MCP protocol tests; spawns server.ts against a temp ZALO_STATE_DIR
+bun test         # db + lock unit tests, proxy protocol, daemon integration (ZALO_FAKE)
 ```
 
-`tools/list` returns exactly 4 tools. tests/setup.ts sets `ZALO_STATE_DIR` to a temp dir and
-`tests/mcp.test.ts` passes it through explicitly via `Bun.spawn({ env })` — on Windows a
-spawned child inherits the original environment block, not `process.env` mutations, so without
-the explicit pass-through the test server would run against the real state dir and its
-PID-takeover would kill a live session's listener. Never spawn `bun server.ts` against the real
-state dir while a session is live.
+`tools/list` returns exactly 4 tools. `tests/setup.ts` sets `ZALO_STATE_DIR` to a temp dir
+(collapsing every path under it) and `ZALO_NO_DAEMON_SPAWN=1` so a spawned proxy never forks a
+real detached daemon that would outlive the test and hold the temp `messages.db` open (breaking
+cleanup on Windows). Test spawns pass `env: {...process.env}` explicitly — on Windows a spawned
+child inherits the original environment block, not `process.env` mutations, so without the
+pass-through a test process would run against the real `~/.claude` DB. `tests/daemon.test.ts`
+runs a real daemon with a fake Zalo API (`ZALO_FAKE=1`, fed inbound via `fake-inbound.jsonl`)
+against its OWN temp dir so its on-disk lock/DB don't collide with the unit tests. Never spawn
+the daemon against the real state dir while a session is live (it would fight for the account).
 
 ## Source layout
 
 `src/` is layered so a second channel (`channels/oa`, coming soon) can reuse everything
 outside `channels/`. Dependency direction is one-way: `constants → utils → core → channels →
-handlers → main`. `core/` never imports a channel; channel-specific message shapes (zca-js
-`Message`/`TMessage`, `Reactions`) stay inside `channels/user/`.
+handlers → {daemon, proxy}`. `core/` never imports a channel; channel-specific message shapes
+(zca-js `Message`/`TMessage`, `Reactions`) stay inside `channels/user/`.
 
 | File | Responsibility |
 |---|---|
-| `server.ts` | Entry shim only — imports `src/main.ts`. Kept at root so `.mcp.json`, `pnpm start`, and tests keep spawning `bun server.ts`. |
-| `src/main.ts` | Wiring + process lifecycle: PID takeover, error traps, MCP connect, shutdown, orphan watchdog, boot cookie-login. |
+| `server.ts` | Entry shim — imports `src/proxy.ts`. Kept at root so `.mcp.json`, `pnpm start`, and tests keep spawning `bun server.ts`. |
+| `src/proxy.ts` | **The per-session proxy.** MCP connect + lifecycle; opens the shared DB; starts the inbound poller + permission poller; `ensureDaemon()`. Dies with its session — no Zalo state to release. |
+| `src/daemon.ts` | **The always-on daemon.** Acquires the single-instance lock, opens DB, injects `ingest` into the session, cookie-login, heartbeat/health, outbound drain loop, retention. NOT unref'd (must block exit). |
 | **`src/constants/`** | |
-| `constants/paths.ts` | `STATE_DIR`/`HOME_STATE_DIR` + file path constants, `STATIC` flag, state-dir mkdir (module side effect). |
-| **`src/utils/`** | Channel-agnostic pure helpers. |
-| `utils/log.ts` | `log()` — prefixed stderr writes (stdout is the MCP transport). |
-| `utils/chunk.ts` | Outbound text chunking (length/newline modes). |
-| **`src/core/`** | Channel-agnostic MCP server + access policy. No imports from `channels/`. |
+| `constants/paths.ts` | Account-global path constants (`HOME_STATE_DIR`, `DB_FILE`, `LOCK_FILE`, `DAEMON_LOG`, `ACCESS_FILE`, `INBOX_DIR`); `MEMORY_DIR` (project-local, for context enrichment); `STATIC` flag; mkdir side effect. |
+| **`src/utils/`** | Channel-agnostic pure helpers. `log.ts` (stderr only), `chunk.ts` (outbound text chunking). |
+| **`src/core/`** | Channel-agnostic. No imports from `channels/`. |
+| `core/db.ts` | **The SQLite bus.** Schema/migrations, WAL + busy_timeout + quick_check/quarantine; `insertMessage`, atomic `claimInbound` (UPDATE…RETURNING), `unprocessedForChat`, `outbound` queue (`enqueue`/`takePending`/`completeOutbound` watermark-tx), `perm_*`, `meta`, `pruneOld`. |
+| `core/lock.ts` | Daemon single-instance lock (`openSync 'wx'` + PID-liveness reclaim). |
+| `core/context.ts` | `buildContext()` — the "previous chat" block: unprocessed rows + a memory snippet, prefixed to the trigger message; returns the watermark id. |
+| `core/daemon-ensure.ts` | Heartbeat-based liveness → start daemon (Scheduled Task or spawn). `ZALO_NO_DAEMON_SPAWN=1` disables spawn (tests). |
+| `core/scheduled-task.ts` | Install/run/query the Windows Scheduled Task; detached spawn fallback (stdio→`daemon.log`, never the proxy's stdout). |
 | `core/mcp.ts` | The `Server` instance: capabilities + model-facing instructions. |
-| `core/access.ts` | `Access` types, `access.json` read/write, static-mode boot snapshot, `assertAllowedChat` outbound gate. |
-| **`src/handlers/`** | The MCP ↔ channel bridge: turn channel events into MCP notifications and MCP tool-calls into channel actions. |
-| `handlers/inbound.ts` | `handleInbound`: self-filter → cache → gate → pairing auto-reply (`PAIRING_SHAPE_RE`) or channel notification. |
-| `handlers/tools.ts` | `registerTools()` — tools/list + tools/call for the 4 tools. |
-| `handlers/permissions.ts` | Permission-request relay to allowlisted DMs + `tryHandlePermissionReply` text intercept. |
+| `core/access.ts` | `Access` types, `access.json` read/write (account-global), static-mode snapshot, `assertAllowedChat` outbound gate. |
+| **`src/handlers/`** | |
+| `handlers/inbound-poller.ts` | Proxy: `claimInbound` → `buildContext` → `notifications/claude/channel`. |
+| `handlers/tools.ts` | `registerTools()` — the 4 tools; each gates then enqueues an `outbound` row and polls `getOutbound` for the result. |
+| `handlers/permissions.ts` | Proxy: `permission_request` → `recordPermRequest` + enqueue `permission_dm`; poll `perm_responses` for THIS session's requests → emit `permission`. |
 | **`src/channels/user/`** | Zalo **personal** account transport (zca-js). Owns all zca-specific types. |
-| `channels/user/session.ts` | Zalo client + `api`/`ownId`/`kicked`/`shuttingDown` state, `wireApi`, cookie-relogin backoff, QR login, `requireApi`. Inbound handler is injected by main (no session↔inbound import cycle). |
+| `channels/user/daemon-runtime.ts` | Daemon glue: `ingest` (self-filter → gate → permission-reply intercept → write `messages` row, quote_json + attachments), `drainOutbound`/`execOutbound` (reply/react/download/login/permission_dm), `buildQuote`. |
+| `channels/user/session.ts` | Zalo client + `api`/`ownId`/`kicked` state, `wireApi`, cookie-relogin backoff, QR login, `getWsState`, `ZALO_FAKE` stub. Inbound handler injected by the daemon. |
+| `channels/user/gate.ts` | The fail-secure `gate()`: pairing codes, allowlist, group + mention policy. |
+| `channels/user/attachments.ts` | Attachment kind/href/title/params mapping, `downloadToInbox` (cookies+UA, 50MB, decrypt hook), `pruneInbox`, `extFor`, `messageText`, `safeName`. |
 | `channels/user/credentials.ts` | `credentials.json` load/save (atomic, 0o600, re-persisted every login). |
-| `channels/user/gate.ts` | The fail-secure inbound `gate()`: pairing codes, allowlist, group + mention policy. Consumes the shared `core/access` policy. |
-| `channels/user/attachments.ts` | Attachment kind/href/title mapping, `downloadToInbox` (50MB cap), `extFor`, `messageText`, `safeName`. |
-| `channels/user/message-cache.ts` | In-memory recent-message cache (msgId → data) for quote/react. |
 | `channels/user/reactions.ts` | Emoji → zca `Reactions` code mapping. |
-| `channels/user/approvals.ts` | `approved/<senderId>` polling → "Paired!" DM. |
-| `channels/user/pidfile.ts` | PID-file takeover of stale listeners + release on shutdown. |
+| `channels/user/approvals.ts` | `approved/<senderId>` polling → "Paired!" DM (runs in the daemon). |
+| `hooks/` | Optional PostToolUse hook (`mark-processed.ts` + `hooks.json`) — belt-and-suspenders watermark mark-processed. |
 | **`src/channels/oa/`** | Zalo **Official Account** transport — coming soon (see `README.md`). |
 | `skills/` | auth, configure, access, status SKILL.md docs (the four skills listed in plugin.json). |
 
 ## State files
 
-`src/paths.ts` keeps two roots. `HOME_STATE_DIR` is the user-root `~/.claude/channels/zalo`
-and holds the authentication files (`credentials.json`, `qr-login.png`) — the Zalo account is
-global, so one login works across every project. `STATE_DIR` holds per-session chat state and is
-resolved in this order: (1)
-`ZALO_STATE_DIR` verbatim; (2) `<CLAUDE_PROJECT_DIR>/.claude/channels/zalo` when the session's
-project root already has a `.claude/` folder (adopt-only — never created); (3)
-`~/.claude/channels/zalo`. Claude Code exports `CLAUDE_PROJECT_DIR` into every MCP server's env,
-which is how the server learns the project root; the `/zalo:*` skills mirror the same rule so
-skill and server share one set of files. When `ZALO_STATE_DIR` is set, both roots collapse to it
-(keeps tests off the real home dir). Writes are atomic (tmp+rename), mode `0o600`.
+**Everything is account-global** at `~/.claude/channels/zalo` (`HOME_STATE_DIR`) — the daemon
+serves every project, so there is no per-project state dir anymore. `ZALO_STATE_DIR` overrides
+the root and collapses every path under it (keeps tests off the real home dir). `MEMORY_DIR`
+(project-local `.claude/memory/zalo`, resolved from `CLAUDE_PROJECT_DIR`) is the ONE remaining
+project-local path — `context.ts` reads the handling session's summarized notes from there for
+context enrichment. Writes are atomic (tmp+rename), mode `0o600`.
 
-- `credentials.json` — **user-root** (`HOME_STATE_DIR`); `{ imei, userAgent, cookie, language? }`, re-persisted after every login (Zalo rotates cookies)
-- `qr-login.png` — **user-root** (`HOME_STATE_DIR`); QR login image
-- `access.json` — `STATE_DIR`; `{ dmPolicy, allowFrom, groups, pending, mentionPatterns?, ackReaction?, replyToMode?, textChunkLimit?, chunkMode? }`. Each `groups[id]` is `{ requireMention, allowFrom, observe? }` — `observe:false` mutes a group persistently.
-- `approved/<senderId>` — `STATE_DIR`; touch-files from `/zalo:access pair`; polled every 5s, confirmed with a "Paired!" DM, removed
-- `inbox/`, `bot.pid` — `STATE_DIR`
-- `<chat_id>.md` transcripts — **`MEMORY_DIR/zalo`** (project-local `.claude/memory/zalo`, NOT `STATE_DIR`; resolved with the same adopt-only rule, collapses under `ZALO_STATE_DIR` for tests). The server appends one line per delivered message (responded or observed) as the deterministic half of the secretary log; Claude keeps summarized notes alongside. Created lazily on first write.
+- `credentials.json` — `{ imei, userAgent, cookie, language? }`, re-persisted after every login (Zalo rotates cookies)
+- `qr-login.png` — QR login image
+- `messages.db` — canonical SQLite log of every inbound message + the daemon↔proxy IPC bus (WAL). Tables: `messages`, `outbound`, `perm_requests`, `perm_responses`, `meta`. The DB replaces the old markdown transcript.
+- `access.json` — `{ dmPolicy, allowFrom, groups, pending, mentionPatterns?, ackReaction?, replyToMode?, textChunkLimit?, chunkMode? }`. Each `groups[id]` is `{ requireMention, allowFrom, observe? }` — `observe:false` mutes a group persistently.
+- `daemon.lock` — single-instance lock (PID + liveness reclaim); `daemon.log` — the detached daemon's log
+- `approved/<senderId>` — touch-files from `/zalo:access pair`; the daemon polls every 5s, confirms with a "Paired!" DM, removes
+- `inbox/` — downloaded attachment bytes; `pruneInbox` age- + size-caps it (14d / 500MB)
+- Claude's summarized secretary notes live in `MEMORY_DIR/zalo/<chat_id>.md` (project-local) — the summarized half; `messages.db` is the complete raw record.
 
 ## MCP tools (4)
 
+All gate via `assertAllowedChat` in the proxy, then enqueue an `outbound` row the daemon drains
+and poll `getOutbound` for the result (a poll timeout means the daemon is down → `/zalo:status`).
+
 | Tool | Purpose |
 |---|---|
-| `reply` | Reply to inbound messages. Gated by `assertAllowedChat`; chunks at ~2000 chars; optional quote via `reply_to` (needs the message cached this session) |
-| `react` | Reaction on a cached inbound message. Emoji mapped to zca `Reactions` codes; gated |
-| `download_attachment` | Fetch a cached message's CDN attachment to `inbox/` (50MB cap); source chat must still be allowlisted |
-| `zalo_login` | QR login; writes `qr-login.png`, resolves with the path while login continues in background |
+| `reply` | Reply to inbound messages. Chunks at ~2000 chars; optional quote via `reply_to` (reconstructed from the DB `quote_json`, survives restart); echoes `watermark_id` to mark-processed |
+| `react` | Reaction on any message the daemon has seen (resolved from the DB, not a session cache — survives restart) |
+| `download_attachment` | Fetch a message's CDN attachment to `inbox/` (50MB cap); resolved from the DB row, source chat must still be allowlisted; result `local_path` persisted so a re-download is a no-op |
+| `zalo_login` | QR login; writes `qr-login.png`, resolves with the path while login continues in background (the daemon runs the actual login) |
 
 ## Key invariants
 
 - **The gate is fail-secure for DMs.** `disabled` drops everything; `allowlist` requires an
   explicit `allowFrom` entry; `pairing` never grants access without terminal approval. Never
   weaken the DM paths.
+- **The daemon is the only Zalo sender and the only inbound `messages` writer.** Proxies read
+  freely (WAL) and write `outbound`/`perm_*` rows; SQLite serializes writers via `busy_timeout`.
+- **Atomic `claimInbound` (UPDATE…RETURNING) is the exactly-once guarantee** — two proxies
+  polling concurrently get disjoint row sets. Never add an owner-election / broadcast path.
+- **Mark-processed is watermark-scoped** (`WHERE id <= watermark`), in the SAME transaction as
+  the outbound status flip — never an open-ended `WHERE processed=0` (a message arriving between
+  send and mark would be swallowed). The proxy passes the watermark from the notification meta.
+- **Zalo login happens only after the daemon lock is held** — a double-spawn can never produce
+  two WebSockets. The lock is the mutex; the Scheduled Task's `IgnoreNew` is belt-and-suspenders.
 - **Groups are open-but-observe-only by design** (deliberate, user-chosen — *not* a hole to
   "fix"). An unknown group is auto-registered (`{requireMention:true, allowFrom:[], observe:true}`)
-  and every message is delivered + logged so the secretary remembers it; the gate returns
-  `respond=false` for unmentioned group messages so Claude records but doesn't reply. `disabled`
-  still kills groups too; `observe:false` mutes one group; an explicit per-group `allowFrom`
-  hard-drops outside senders. `respond` flows to inbound (gates typing/ack/photo-download) and to
-  the `should_reply` notification meta. Auto-registration is why outbound replies to a mentioned
-  group pass `assertAllowedChat`.
+  and every message is logged to SQLite so the record is complete; the gate returns
+  `respond=false` for unmentioned group messages → `should_reply=0`, so they are **logged only,
+  never delivered to a session** (no LLM wake). `disabled` still kills groups; `observe:false`
+  mutes one group; an explicit per-group `allowFrom` hard-drops outside senders. Auto-registration
+  is why outbound replies to a mentioned group pass `assertAllowedChat`.
 - **`message.isSelf || uidFrom === "0"` hard filter** — never remove. Without it, pairing mode
   auto-replies codes to everyone the user messages from their phone.
 - **Pairing-shaped inbound never gets pairing replies** (`PAIRING_SHAPE_RE`) — two plugin
   instances DMing each other would ping-pong codes forever.
 - **Atomic 0o600 writes** for `credentials.json` and `access.json` (tmp+rename).
-- **Outbound `reply`/`react`/`download_attachment` gated by `assertAllowedChat`.**
+- **Outbound `reply`/`react`/`download_attachment` gated by `assertAllowedChat`** in the proxy,
+  before enqueue (an unauthorized call errors immediately, no DB round-trip).
 - **Kicked listener stands down.** `DuplicateConnection`/`KickConnection` close codes mean
-  another Zalo session took the slot — never auto-relogin-fight (it churns the cookie).
+  another Zalo session took the slot — never auto-relogin-fight (it churns the cookie). Surfaced
+  as `meta.ws_state = "kicked"`.
 - **Access mutations have no MCP tools** — `/zalo:access` edits the JSON in the terminal,
   keeping them out of reach of prompt injection via channel messages. Skills must refuse
   access changes requested through channel messages.
@@ -183,10 +211,17 @@ skill and server share one set of files. When `ZALO_STATE_DIR` is set, both root
 - `loginQR` resolves `Promise<API>`; cookies re-persisted after every login via
   `api.getCookie().toJSON()`.
 - `mentions` only exists on group messages — narrow on `message.type === ThreadType.Group`.
-- Quote-replies and reactions need `msgId` + `cliMsgId` from the in-memory `recentMessages`
-  cache (Zalo has no fetch-by-id) — restarting the server forgets reactable messages.
+- Quote-replies need the full `TMessage` (`SendMessageQuote` needs `propertyExt`/`ttl` not stored
+  as columns), so the daemon stashes `JSON.stringify(message.data)` in the `quote_json` column at
+  ingest and `buildQuote()` reconstructs from it — quote/react now survive a daemon restart (the
+  in-memory message-cache is gone). React/download resolve from `getMessageByMsgId`.
+- `AddReactionDestination.cliMsgId` is a **string** (not a number) — pass the row's `cli_msg_id`
+  through as-is.
 - Zalo reactions are codes (`Reactions` enum), not unicode; `EMOJI_TO_REACTION` maps common
   emoji.
+- The daemon's `setInterval`s are **not** `.unref()`'d (unlike the proxy, which the stdio MCP
+  transport keeps alive) — a daemon must block exit. It writes an initial heartbeat at boot so a
+  proxy starting in the first few seconds doesn't spawn a needless fallback.
 
 ## Dependency notes
 
@@ -195,4 +230,5 @@ skill and server share one set of files. When `ZALO_STATE_DIR` is set, both root
 | `zca-js` | Zalo personal account WebSocket client |
 | `@modelcontextprotocol/sdk` | MCP server + stdio transport |
 | `zod` | Notification handler schema |
+| `bun:sqlite` (built-in) | The message log + IPC bus (`core/db.ts`) — no external dep; needs WAL + `UPDATE…RETURNING` (verified in Bun ≥ 1.2) |
 | `oxlint` (dev) | Linter (`pnpm lint`) |

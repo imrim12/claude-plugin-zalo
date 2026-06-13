@@ -9,17 +9,42 @@ Read the QR code image at the path from the response and show it to the user, th
 > Open Zalo mobile app → More → QR scan → scan the code → confirm on your phone (within ~100 seconds).
 
 Login completes in the background; credentials are saved to `~/.claude/channels/zalo/credentials.json`
-automatically. Everything authentication-related — both the credentials and the QR image
-(`qr-login.png`) — lives in the user-root dir, not the project-local state dir, because the Zalo
-account is global: one scan works across every project, no re-scan on restart. (`$ZALO_STATE_DIR`
-overrides the location, and `zalo_login` returns the QR's full path anyway, so just use the path
-it gives you.) There is no status tool — confirm the login worked by sending or receiving a
-message, or check that `~/.claude/channels/zalo/credentials.json` now exists.
+automatically. Authentication — credentials and the QR image (`qr-login.png`) — is account-global
+(user-root), because the Zalo account is global: one scan works across every project, no re-scan
+on restart. (`$ZALO_STATE_DIR` overrides the location, and `zalo_login` returns the QR's full
+path anyway, so just use the path it gives you.) Confirm the login worked by sending or receiving
+a message, by `/zalo:status`, or by checking that `~/.claude/channels/zalo/credentials.json` now
+exists.
 
-After login, remind the user: **inbound** messages only render in the session if Claude Code was launched with channel delivery enabled for this plugin:
+## After login — install the 24/7 background task (Windows)
+
+A single always-on **daemon** owns the Zalo connection and logs every message to SQLite. Without
+the Scheduled Task it only runs while a Claude session is open (spawn-on-demand); install the
+task once so messages are captured even with no session open and it auto-restarts on crash/logon.
+
+Offer to print the install command (resolve `<plugin>` to `$CLAUDE_PLUGIN_ROOT`). It writes a
+logon-triggered, restart-on-failure task; run it in the user's terminal so any UAC prompt is
+visible:
+
+```
+bun -e "import('<plugin>/src/core/scheduled-task.ts').then(m=>console.log(m.installScheduledTaskXml()))" | powershell -
+```
+
+Verify:  `schtasks /query /tn ClaudeZaloDaemon`
+Remove:  `schtasks /delete /tn ClaudeZaloDaemon /f`
+
+Keep this optional — without the task the spawn-on-demand fallback still gives session-scoped
+operation; the task is what adds no-session 24/7 capture. (On macOS/Linux there is no Scheduled
+Task; the daemon runs via the spawn fallback for the life of your sessions.)
+
+## Inbound delivery flag
+
+After login, remind the user: **inbound** messages only render in the session if Claude Code was
+launched with channel delivery enabled for this plugin:
 
 ```
 claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
-Without it, outbound tools work but incoming Zalo messages are silently dropped by Claude Code (the plugin is not on the built-in approved-channels allowlist).
+Without it, outbound tools work but incoming Zalo messages are silently dropped by Claude Code
+(the plugin is not on the built-in approved-channels allowlist).

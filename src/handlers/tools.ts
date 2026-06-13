@@ -1,17 +1,16 @@
 // The 4 MCP tools: reply, react, download_attachment, zalo_login.
-// All outbound actions are gated by assertAllowedChat.
+// The proxy no longer talks to Zalo directly — every action is enqueued as an `outbound` row
+// for the daemon to drain, then the tool polls for the result. The access gate still runs HERE
+// (before enqueue) so an unauthorized reply errors immediately, with no DB round-trip.
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { ThreadType, type SendMessageQuote } from 'zca-js'
+import { randomBytes } from 'crypto'
 import { mcp } from '../core/mcp.ts'
-import { requireApi, beginQRLogin } from '../channels/user/session.ts'
 import { loadAccess, assertAllowedChat, MAX_CHUNK_LIMIT } from '../core/access.ts'
 import { chunk } from '../utils/chunk.ts'
-import { toReaction } from '../channels/user/reactions.ts'
-import { getCachedMessage } from '../channels/user/message-cache.ts'
-import { attachmentHref, downloadToInbox, extFor } from '../channels/user/attachments.ts'
+import { enqueueOutbound, getOutbound, getMessageByMsgId } from '../core/db.ts'
 
 export function registerTools(): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -34,6 +33,11 @@ export function registerTools(): void {
               type: 'string',
               description: 'Message ID to quote. Use message_id from the inbound <channel> block.',
             },
+            watermark_id: {
+              type: 'string',
+              description:
+                'Pass watermark_id from the inbound <channel> meta so the messages you have now answered are marked processed.',
+            },
           },
           required: ['chat_id', 'text'],
         },
@@ -41,7 +45,7 @@ export function registerTools(): void {
       {
         name: 'react',
         description:
-          'Add a reaction to a Zalo message. Accepts common emoji (👍 👎 ❤️ 😂 😮 😢 😡 🎉 ✅ …) or a raw zca reaction code. Only messages received this session can be reacted to.',
+          'Add a reaction to a Zalo message. Accepts common emoji (👍 👎 ❤️ 😂 😮 😢 😡 🎉 ✅ …) or a raw zca reaction code. Works for any message the daemon has seen (survives restarts).',
         inputSchema: {
           type: 'object',
           properties: {
@@ -103,92 +107,82 @@ export function registerTools(): void {
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }> }
 
+function idem(): string { return randomBytes(8).toString('hex') }
+
+// Poll the outbound row the daemon drains. A timeout almost always means the daemon isn't
+// running — point the user at /zalo:status.
+async function awaitResult(id: number, timeoutMs = 15_000): Promise<{ status: string; result: unknown }> {
+  const start = Date.now()
+  for (;;) {
+    const row = getOutbound(id)
+    if (row && row.status !== 'pending') return { status: row.status, result: row.result ? JSON.parse(row.result) : null }
+    if (Date.now() - start > timeoutMs) throw new Error('daemon did not process the request in time (is it running? /zalo:status)')
+    await Bun.sleep(150)
+  }
+}
+
 async function handleReply(args: Record<string, unknown>): Promise<ToolResult> {
   const chat_id = args.chat_id as string
   const text = args.text as string
-  const threadType = args.thread_type === 'group' ? ThreadType.Group : ThreadType.User
+  const thread_type = args.thread_type === 'group' ? 'group' : 'user'
   const reply_to = args.reply_to as string | undefined
+  const watermark_id = args.watermark_id != null ? Number(args.watermark_id) : undefined
 
   assertAllowedChat(chat_id)
-  const zaloApi = requireApi()
-
   const access = loadAccess()
   const limit = Math.max(1, Math.min(access.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT))
-  const mode = access.chunkMode ?? 'length'
+  const chunks = chunk(text, limit, access.chunkMode ?? 'length')
   const replyMode = access.replyToMode ?? 'first'
-  const chunks = chunk(text, limit, mode)
-  const sentIds: number[] = []
+  const quoteMsgId = reply_to && replyMode !== 'off' ? reply_to : undefined
 
-  let quote: SendMessageQuote | undefined
-  if (reply_to != null && replyMode !== 'off') {
-    const cached = getCachedMessage(reply_to)
-    if (!cached) throw new Error(`message ${reply_to} not seen this session — cannot quote it, omit reply_to`)
-    quote = {
-      content: cached.data.content,
-      msgType: cached.data.msgType,
-      propertyExt: cached.data.propertyExt,
-      uidFrom: cached.data.uidFrom,
-      msgId: cached.data.msgId,
-      cliMsgId: cached.data.cliMsgId,
-      ts: cached.data.ts,
-      ttl: cached.data.ttl,
-    }
-  }
-
-  try {
-    for (let i = 0; i < chunks.length; i++) {
-      const shouldQuote = quote != null && (replyMode === 'all' || i === 0)
-      const sent = await zaloApi.sendMessage(
-        shouldQuote ? { msg: chunks[i], quote } : { msg: chunks[i] },
-        chat_id,
-        threadType,
-      )
-      if (sent.message?.msgId != null) sentIds.push(sent.message.msgId)
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(
-      `reply failed after ${sentIds.length} of ${chunks.length} chunk(s) sent: ${msg}`,
-    )
-  }
-
-  const result =
-    sentIds.length === 1
-      ? `sent (id: ${sentIds[0]})`
-      : `sent ${sentIds.length} parts (ids: ${sentIds.join(', ')})`
-  return { content: [{ type: 'text', text: result }] }
+  const id = enqueueOutbound({
+    kind: 'reply', idem_key: idem(),
+    chat_id, thread_type, watermark_id: watermark_id ?? null,
+    payload: JSON.stringify({ chunks, quoteMsgId }),
+  })
+  const { status, result } = await awaitResult(id)
+  if (status === 'failed') throw new Error((result as { error?: string })?.error ?? 'reply failed')
+  const ids = (result as { sentIds?: number[] }).sentIds ?? []
+  return { content: [{ type: 'text', text: ids.length === 1 ? `sent (id: ${ids[0]})` : `sent ${ids.length} parts (ids: ${ids.join(', ')})` }] }
 }
 
 async function handleReact(args: Record<string, unknown>): Promise<ToolResult> {
   const chat_id = args.chat_id as string
   const message_id = args.message_id as string
+  const emoji = args.emoji as string
   assertAllowedChat(chat_id)
-  const zaloApi = requireApi()
-  const cached = getCachedMessage(message_id)
-  if (!cached) throw new Error(`message ${message_id} not seen this session — cannot react to it`)
-  await zaloApi.addReaction(toReaction(args.emoji as string), {
-    data: { msgId: cached.data.msgId, cliMsgId: cached.data.cliMsgId },
-    threadId: cached.threadId,
-    type: cached.type,
+
+  const id = enqueueOutbound({
+    kind: 'react', idem_key: idem(),
+    chat_id, target_msg_id: message_id, emoji,
   })
+  const { status, result } = await awaitResult(id)
+  if (status === 'failed') throw new Error((result as { error?: string })?.error ?? 'react failed')
   return { content: [{ type: 'text', text: 'reacted' }] }
 }
 
 async function handleDownloadAttachment(args: Record<string, unknown>): Promise<ToolResult> {
   const message_id = args.message_id as string
-  const cached = getCachedMessage(message_id)
-  if (!cached) throw new Error(`message ${message_id} not seen this session — cannot fetch its attachment`)
-  // Outbound-gate the source chat too: a message cached before an
-  // allowlist revocation shouldn't stay fetchable after it.
-  assertAllowedChat(cached.threadId)
-  const href = attachmentHref(cached.data)
-  if (!href) throw new Error(`message ${message_id} has no downloadable attachment`)
-  const path = await downloadToInbox(href, extFor(cached.data), message_id)
-  return { content: [{ type: 'text', text: path }] }
+  // Gate the source chat too: a message seen before an allowlist revocation shouldn't stay
+  // fetchable after it. The daemon logged every message, so look the row up for its chat_id.
+  const row = getMessageByMsgId(message_id)
+  if (!row) throw new Error(`message ${message_id} not found — the daemon has no record of it`)
+  assertAllowedChat(row.chat_id)
+  if (!row.att_href) throw new Error(`message ${message_id} has no downloadable attachment`)
+
+  const id = enqueueOutbound({
+    kind: 'download', idem_key: idem(), target_msg_id: message_id,
+  })
+  const { status, result } = await awaitResult(id, 60_000)
+  if (status === 'failed') throw new Error((result as { error?: string })?.error ?? 'download failed')
+  return { content: [{ type: 'text', text: (result as { path: string }).path }] }
 }
 
 async function handleZaloLogin(): Promise<ToolResult> {
-  const qrPath = await beginQRLogin()
+  const id = enqueueOutbound({ kind: 'login', idem_key: idem() })
+  const { status, result } = await awaitResult(id, 30_000)
+  if (status === 'failed') throw new Error((result as { error?: string })?.error ?? 'login failed')
+  const qrPath = (result as { qrPath: string }).qrPath
   return {
     content: [{
       type: 'text',

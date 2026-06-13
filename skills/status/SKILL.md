@@ -3,41 +3,65 @@ name: status
 description: Check the current status of the Zalo plugin and its subsystems. Use when the user says "Zalo status", "is Zalo connected", "check Zalo", or to diagnose connection issues.
 ---
 
-There is no status MCP tool — diagnose from state files and logs.
+There is no status MCP tool — diagnose from the daemon's health record and state files.
 
-**Two locations.** Authentication (login credentials and the QR image) is account-global and
-always lives in `~/.claude/channels/zalo/` (`credentials.json`, `qr-login.png`). Per-session
-chat state (access policy, pairings, inbox, pid) lives in the resolved `<state>` dir (the
-channel server uses the same rule, so you read the same files it writes):
-1. If `$ZALO_STATE_DIR` is set, use it.
-2. Else if a `.claude/` directory exists in the project root (where Claude Code was launched),
-   use `<project>/.claude/channels/zalo`.
-3. Else use `~/.claude/channels/zalo`.
+**Everything is account-global now.** A single always-on **daemon** owns the Zalo connection
+and a SQLite log at `~/.claude/channels/zalo/` (`messages.db`, `credentials.json`,
+`qr-login.png`, `access.json`, `daemon.lock`, `daemon.log`). Per-session Claude proxies talk to
+it through that DB. `$ZALO_STATE_DIR` overrides the location (and collapses everything under it).
 
-Paths below are relative to the resolved chat-state dir, except `credentials.json` and
-`qr-login.png` (user-root).
+## 1. Daemon health (the key signal)
 
-1. **Login** — does `~/.claude/channels/zalo/credentials.json` exist (user-root, shared across
-   projects)? Missing → not logged in, suggest `/zalo:auth`. Present → cookie login is attempted
-   at boot (it can still be stale; the server stderr says `cookie login failed` if so).
+The daemon publishes health into the DB `meta` table. Read it (resolve `<plugin>` to
+`$CLAUDE_PLUGIN_ROOT`):
 
-2. **Owner** — read `bot.pid`. That process holds the Zalo listener (last session wins).
+```
+bun -e "import('<plugin>/src/core/db.ts').then(m=>{const g=m.getMeta;console.log(JSON.stringify({ws:g('ws_state'),heartbeat:g('heartbeat'),lastInbound:g('last_inbound_at'),started:g('started_at')},null,2))})"
+```
 
-3. **Access** — read `access.json` (missing = defaults). Show dmPolicy, allowed-sender count,
-   pending pairing codes. If pending > 0, mention `/zalo:access` to review them.
+Interpret:
+- **heartbeat older than ~15s** → daemon is DOWN. Start it: `schtasks /run /tn ClaudeZaloDaemon`
+  (or just launch a Claude session — the proxy spawns it as a fallback).
+- **ws_state = "kicked"** → another Zalo session (phone/browser/second login) took the slot. The
+  daemon stood down on purpose (fighting it would churn the cookie). Close the other session,
+  then `/zalo:auth` to reconnect.
+- **ws_state = "connected"** + recent `lastInbound` → healthy.
+- **ws_state = "reconnecting"** → transient; cookie re-login backoff in progress.
+- **ws_state = "disconnected"** → no credentials yet, or login hasn't completed. Check login (2).
 
-4. **Inbound delivery** — the most common "everything works except messages don't show up"
-   cause. Claude Code only renders channel notifications from plugins on its approved
-   allowlist; this plugin needs the session launched with:
+## 2. Login
 
-   ```
-   claude --dangerously-load-development-channels plugin:zalo@imrim12
-   ```
+Does `~/.claude/channels/zalo/credentials.json` exist? Missing → not logged in, suggest
+`/zalo:auth`. Present → the daemon cookie-logs-in at boot (can still be stale; `daemon.log`
+says `cookie login failed` if so).
 
-   To confirm a drop, check the newest file in Claude Code's MCP log dir for the current
-   project (`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\` on
-   Windows) for a line like `Channel notifications skipped: plugin zalo@imrim12 is not on the
-   approved channels allowlist`. Server-side stderr lines (`zalo channel: ...`) in the same
-   file show login, listener, and kick events.
+## 3. Scheduled Task (24/7 capture)
+
+```
+schtasks /query /tn ClaudeZaloDaemon
+```
+
+Running → messages are logged even with no Claude session open. Not found → only the
+spawn-on-demand fallback runs (capture stops when the last session closes). Offer `/zalo:auth`,
+which installs the task.
+
+## 4. Access
+
+Read `~/.claude/channels/zalo/access.json` (missing = defaults). Show dmPolicy, allowed-sender
+count, pending pairing codes. If pending > 0, mention `/zalo:access` to review them.
+
+## 5. Inbound delivery (the most common "everything works but nothing shows up")
+
+Claude Code only renders channel notifications from plugins on its approved allowlist; this
+plugin needs the session launched with:
+
+```
+claude --dangerously-load-development-channels plugin:zalo@imrim12
+```
+
+To confirm a drop, check the newest file in Claude Code's MCP log dir for the current project
+(`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\` on Windows) for a
+line like `Channel notifications skipped: plugin zalo@imrim12 is not on the approved channels
+allowlist`. Daemon-side events live in `~/.claude/channels/zalo/daemon.log`.
 
 Summarize each point clearly and end with the single most relevant next step.
