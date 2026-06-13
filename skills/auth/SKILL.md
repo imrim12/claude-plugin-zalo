@@ -16,26 +16,24 @@ path anyway, so just use the path it gives you.) Confirm the login worked by sen
 a message, by `/zalo:status`, or by checking that `~/.claude/channels/zalo/credentials.json` now
 exists.
 
-## After login — install the 24/7 background task (Windows)
+## The 24/7 background task (Windows) — auto-installed
 
-A single always-on **daemon** owns the Zalo connection and logs every message to SQLite. Without
-the Scheduled Task it only runs while a Claude session is open (spawn-on-demand); install the
-task once so messages are captured even with no session open and it auto-restarts on crash/logon.
+A single always-on **daemon** owns the Zalo connection and logs every message to SQLite. The
+daemon **auto-installs** its Windows Scheduled Task on first boot (a logon-triggered,
+restart-on-failure task — no elevation needed, idempotent), so no-session 24/7 capture and
+auto-restart on crash/logon work with zero extra commands. Nothing to run by hand.
 
-Offer to print the install command (resolve `<plugin>` to `$CLAUDE_PLUGIN_ROOT`). It writes a
-logon-triggered, restart-on-failure task; run it in the user's terminal so any UAC prompt is
-visible:
+If you ever need to inspect or remove it:
 
 ```
-bun -e "import('<plugin>/src/core/scheduled-task.ts').then(m=>console.log(m.installScheduledTaskXml()))" | powershell -
+schtasks /query  /tn ClaudeZaloDaemon
+schtasks /delete /tn ClaudeZaloDaemon /f
 ```
 
-Verify:  `schtasks /query /tn ClaudeZaloDaemon`
-Remove:  `schtasks /delete /tn ClaudeZaloDaemon /f`
-
-Keep this optional — without the task the spawn-on-demand fallback still gives session-scoped
-operation; the task is what adds no-session 24/7 capture. (On macOS/Linux there is no Scheduled
-Task; the daemon runs via the spawn fallback for the life of your sessions.)
+Should the install ever fail (it logs to `daemon.log` and falls back automatically), the
+spawn-on-demand fallback still gives session-scoped operation — the task is only what adds
+no-session capture. (On macOS/Linux there is no Scheduled Task; the daemon runs via the spawn
+fallback for the life of your sessions.)
 
 ## Inbound delivery flag
 

@@ -120,7 +120,7 @@ handlers → {daemon, proxy}`. `core/` never imports a channel; channel-specific
 | `core/lock.ts` | Daemon single-instance lock (`openSync 'wx'` + PID-liveness reclaim). |
 | `core/context.ts` | `buildContext()` — the "previous chat" block: unprocessed rows + a memory snippet, prefixed to the trigger message; returns the watermark id. |
 | `core/daemon-ensure.ts` | Heartbeat-based liveness → start daemon (Scheduled Task or spawn). `ZALO_NO_DAEMON_SPAWN=1` disables spawn (tests). |
-| `core/scheduled-task.ts` | Install/run/query the Windows Scheduled Task; detached spawn fallback (stdio→`daemon.log`, never the proxy's stdout). |
+| `core/scheduled-task.ts` | Install/run/query the Windows Scheduled Task; detached spawn fallback (stdio→`daemon.log`, never the proxy's stdout). The daemon calls `ensureScheduledTaskInstalled()` at boot (idempotent, Windows-only, no elevation; skipped under `ZALO_FAKE`) so 24/7 capture needs no manual command; `installScheduledTaskXml()` remains the manual PowerShell path. |
 | `core/mcp.ts` | The `Server` instance: capabilities + model-facing instructions. |
 | `core/access.ts` | `Access` types, `access.json` read/write (account-global), static-mode snapshot, `assertAllowedChat` outbound gate. |
 | **`src/handlers/`** | |

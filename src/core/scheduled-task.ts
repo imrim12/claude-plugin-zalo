@@ -4,7 +4,9 @@
 // (objection A14) and its own log file — inheriting the proxy's stdout would corrupt the MCP
 // transport (same class as the --silent bug).
 import { spawn, spawnSync } from 'child_process'
-import { openSync } from 'fs'
+import { openSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { DAEMON_LOG } from '../constants/paths.ts'
 import { log } from '../utils/log.ts'
@@ -37,6 +39,25 @@ export function startDaemonViaScheduledTask(): boolean {
 export function isScheduledTaskInstalled(): boolean {
   if (process.platform !== 'win32') return false
   return runSync('schtasks', ['/query', '/tn', TASK_NAME]) === 0
+}
+
+// Auto-install used by the daemon at boot: register the task directly (no PowerShell
+// round-trip), idempotently. A logon-triggered task for the current user needs no
+// elevation, so this runs silently. No-op off Windows or if already installed.
+// Returns true if the task is present afterwards (already-installed counts as success).
+export function ensureScheduledTaskInstalled(): boolean {
+  if (process.platform !== 'win32') return false
+  if (isScheduledTaskInstalled()) return true
+  try {
+    // schtasks reads the XML as UTF-16LE (the <?xml encoding="UTF-16"?> declaration);
+    // write it with a BOM so the parser agrees — same as `Set-Content -Encoding Unicode`.
+    const xmlPath = join(tmpdir(), 'claude-zalo-task.xml')
+    writeFileSync(xmlPath, '﻿' + scheduledTaskXml(bunExe(), daemonEntry()), { encoding: 'utf16le' })
+    const status = runSync('schtasks', ['/create', '/tn', TASK_NAME, '/xml', xmlPath, '/f'])
+    if (status === 0) { log('scheduled task installed (24/7 capture enabled)'); return true }
+    log(`scheduled task install failed (schtasks exit ${status}) — falling back to spawn-on-demand`)
+    return false
+  } catch (e) { log(`scheduled task install error: ${e} — falling back to spawn-on-demand`); return false }
 }
 
 // Install: register a logon-triggered, restart-on-failure task. Uses an XML definition because
