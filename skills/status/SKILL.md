@@ -20,8 +20,8 @@ bun -e "import('<plugin>/src/core/db.ts').then(m=>{const g=m.getMeta;console.log
 ```
 
 Interpret:
-- **heartbeat older than ~15s** → daemon is DOWN. Start it: `schtasks /run /tn ClaudeZaloDaemon`
-  (or just launch a Claude session — the proxy spawns it as a fallback).
+- **heartbeat older than ~15s** → daemon is DOWN. Start it by launching (or reopening) a Claude
+  session — the proxy spawns the detached daemon on demand.
 - **ws_state = "kicked"** → another Zalo session (phone/browser/second login) took the slot. The
   daemon stood down on purpose (fighting it would churn the cookie). Close the other session,
   then `/zalo:auth` to reconnect.
@@ -35,15 +35,14 @@ Does `~/.claude/channels/zalo/credentials.json` exist? Missing → not logged in
 `/zalo:auth`. Present → the daemon cookie-logs-in at boot (can still be stale; `daemon.log`
 says `cookie login failed` if so).
 
-## 3. Scheduled Task (24/7 capture)
+## 3. Daemon lifecycle
 
-```
-schtasks /query /tn ClaudeZaloDaemon
-```
-
-Running → messages are logged even with no Claude session open. Not found → only the
-spawn-on-demand fallback runs (capture stops when the last session closes). Offer `/zalo:auth`,
-which installs the task.
+The daemon is **spawn-on-demand**: a proxy launches it (detached, no console window) when it
+finds no live heartbeat, and it persists across sessions until the machine reboots. There is no
+Scheduled Task and nothing installed on the system — if the daemon is down, open a Claude session
+to respawn it. (Older versions installed a `ClaudeZaloDaemon` Scheduled Task; if you see one
+lingering, it's a leftover and can be removed with `schtasks /delete /tn ClaudeZaloDaemon /f` or
+`/zalo:uninstall`.)
 
 ## 4. Access
 

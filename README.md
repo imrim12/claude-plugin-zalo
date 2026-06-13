@@ -8,7 +8,7 @@ your own identity — this is your **personal** Zalo account, driven over a WebS
 ## Features
 
 - **Live channel events** — no polling; allowed senders' messages render in the session as they arrive
-- **Always-on daemon** — a single background process owns the Zalo connection and runs 24/7 (Windows Scheduled Task), so opening/closing Claude sessions never drops the connection
+- **Background daemon** — a single detached process owns the Zalo connection (spawn-on-demand; no console window, no scheduled task, nothing installed), so opening/closing Claude sessions never drops the connection
 - **Logs every message to SQLite** — every inbound message is persisted to a canonical SQLite log, independent of whether a session is open
 - **Answers only when @mentioned** — DMs and group @mentions wake the LLM; unmentioned group messages are logged silently (no reply, no LLM)
 - **Multi-session safe** — N Claude sessions coexist; exactly one answers each message (atomic claim), none fight over the account
@@ -156,21 +156,16 @@ All under `~/.claude/channels/zalo` (mode `0600`, atomic writes):
 - `approved/<senderId>` — touch-files dropped by `/zalo:access pair`; the daemon polls, DMs "Paired!", and removes them
 - `inbox/` — downloaded attachment bytes (age- and size-capped)
 
-## 24/7 background daemon
+## Background daemon
 
 A single **daemon** owns the Zalo connection and the SQLite log; each Claude session runs a thin
-**proxy** that talks to the daemon only through `messages.db` (no socket). `/zalo:auth` offers to
-install a Windows **Scheduled Task** (logon trigger, restart-on-failure) so the daemon runs even
-with no session open and auto-restarts on crash:
-
-```
-schtasks /query  /tn ClaudeZaloDaemon   # check
-schtasks /run    /tn ClaudeZaloDaemon   # start now
-schtasks /delete /tn ClaudeZaloDaemon /f  # uninstall
-```
-
-Without the task, a proxy spawns the daemon on demand (session-scoped capture only). On
-macOS/Linux there is no Scheduled Task; the spawn fallback is used.
+**proxy** that talks to the daemon only through `messages.db` (no socket). The daemon is
+**spawn-on-demand**: the first session that needs it launches it as a detached background process
+(no console window), and it keeps running across later sessions until you reboot. Nothing is
+installed on your machine — there is no Scheduled Task, nothing runs on a timer, and there is no
+background process at all until a session starts one. Closing every session leaves the daemon
+running (so messages keep logging) until the next reboot; the next session you open re-spawns it
+if needed. This is the only mode, on every platform.
 
 ## Architecture
 
@@ -184,7 +179,7 @@ always-on **daemon** is `src/daemon.ts`. Two processes, one DB:
 | `core/db.ts` | The SQLite bus: schema, atomic `claimInbound`, `outbound` queue, watermark mark-processed, retention |
 | `core/lock.ts` | Daemon single-instance lock (Zalo login happens only after the lock is held) |
 | `core/context.ts` | Builds the "previous chat" context block (unprocessed rows + memory) fed before answering |
-| `core/scheduled-task.ts` / `core/daemon-ensure.ts` | Windows Scheduled Task install/run + spawn fallback; heartbeat-based daemon liveness |
+| `core/daemon-ensure.ts` | Heartbeat-based daemon liveness; spawns the detached daemon on demand |
 | `access.ts` / `gate.ts` | `access.json` types + outbound gate; the fail-secure inbound gate (pairing / allowlist / group + mention) |
 | `session.ts` | Zalo login/listener lifecycle: cookie re-login with backoff, QR bootstrap, kick stand-down, `ws_state` |
 | `tools.ts` / `permissions.ts` | The 4 MCP tools (enqueue + poll); permission DM relay + `yes/no <id>` reply routing |

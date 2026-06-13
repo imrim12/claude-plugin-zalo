@@ -1,6 +1,6 @@
 // The Zalo daemon: single-instance, owns the Zalo connection + SQLite, drains
-// outbound, publishes health. Started by a Scheduled Task (Phase 4) or spawned as
-// a fallback by a proxy. Never inherits stdio — logs to a file (objection A14).
+// outbound, publishes health. Spawned on demand (detached) by a proxy that finds
+// no live daemon. Never inherits stdio — logs to a file (objection A14).
 import { acquireDaemonLock, releaseDaemonLock } from './core/lock.ts'
 import {
   setInboundHandler, cookieLogin, isShuttingDown, markShuttingDown, getWsState,
@@ -8,17 +8,10 @@ import {
 import { ingest, drainOutbound } from './channels/user/daemon-runtime.ts'
 import { pruneInbox } from './channels/user/attachments.ts'
 import { startApprovalPolling } from './channels/user/approvals.ts'
-import { ensureScheduledTaskInstalled } from './core/scheduled-task.ts'
 import { db, setMeta, pruneOld } from './core/db.ts'
 import { log } from './utils/log.ts'
 
 if (!acquireDaemonLock()) { log('another daemon holds the lock — exiting'); process.exit(0) }
-
-// We own the single-instance lock, so we're the only one that should touch the OS task.
-// Idempotent + Windows-only; on failure we just keep running via spawn-on-demand.
-// Skip under ZALO_FAKE (the integration test's daemon) so tests never mutate the real
-// task scheduler.
-if (process.env.ZALO_FAKE !== '1') ensureScheduledTaskInstalled()
 
 process.on('unhandledRejection', err => log(`unhandled rejection: ${err}`))
 process.on('uncaughtException', err => log(`uncaught exception: ${err}`))

@@ -1,12 +1,12 @@
 ---
 name: uninstall
-description: Fully remove the Zalo channel — stop the daemon, delete the Scheduled Task, and wipe all state (credentials, message DB, access policy, attachments, memory). Use when the user says "uninstall Zalo", "remove the Zalo plugin", "clean up Zalo", "delete everything Zalo", or wants a clean teardown.
+description: Fully remove the Zalo channel — stop the daemon, wipe all state (credentials, message DB, access policy, attachments, memory), and clean up any leftover Scheduled Task from older versions. Use when the user says "uninstall Zalo", "remove the Zalo plugin", "clean up Zalo", "delete everything Zalo", or wants a clean teardown.
 ---
 
-This is a **destructive, irreversible** teardown. It stops the background daemon, removes the
-Windows Scheduled Task, and deletes every state file the plugin created — login credentials, the
-full SQLite message history, access policy/pairings, downloaded attachments, and the secretary
-memory notes. There is no undo.
+This is a **destructive, irreversible** teardown. It stops the background daemon, deletes every
+state file the plugin created — login credentials, the full SQLite message history, access
+policy/pairings, downloaded attachments, and the secretary memory notes — and removes any leftover
+`ClaudeZaloDaemon` Scheduled Task left by older versions. There is no undo.
 
 ## 0. Confirm first — ALWAYS
 
@@ -40,24 +40,24 @@ The daemon owns the Zalo WebSocket; kill it before deleting its files (on Window
 
 **Windows:**
 ```
-schtasks /end /tn ClaudeZaloDaemon          # stop a task-launched instance (ignore "not found")
-taskkill /PID <pid-from-lock-file> /F        # stop a spawn-fallback instance
+taskkill /PID <pid-from-lock-file> /F        # stop the detached daemon process
 ```
 Read `<pid-from-lock-file>` from the `lock` path resolved in step 1 (the file is just the number).
 If the lock file is absent, the daemon isn't running — skip the `taskkill`.
 
-**macOS/Linux:** there is no Scheduled Task; just `kill <pid-from-lock-file>` (the PID from the
-lock file).
+**macOS/Linux:** `kill <pid-from-lock-file>` (the PID from the lock file).
 
-## 3. Remove the Scheduled Task (Windows only)
+## 3. Remove any leftover Scheduled Task (Windows only)
+
+The current plugin does NOT create a Scheduled Task (the daemon is spawn-on-demand only). But
+**older versions** auto-installed one named `ClaudeZaloDaemon`; remove it if present so nothing is
+left behind:
 
 ```
-schtasks /delete /tn ClaudeZaloDaemon /f
+schtasks /delete /tn ClaudeZaloDaemon /f   # ignore "ERROR: ... cannot find" — means none exists
 ```
 
-Order matters: the daemon **re-installs** this task at boot, so it must be deleted **after** the
-daemon is stopped (step 2) and the plugin is uninstalled (step 6) — otherwise the next session
-that spawns a daemon recreates it. On macOS/Linux there is no task; skip this step.
+On macOS/Linux there is never a task; skip this step.
 
 ## 4. Delete all account-global state
 
@@ -94,7 +94,7 @@ entries). Tell the user to finish by running, in their terminal:
 …then uninstall **zalo** from the `imrim12` marketplace (or whichever marketplace it came from).
 That unregisters it and removes the cached checkout under
 `~/.claude/plugins/cache/<marketplace>/zalo/`. Do this **last** — once the plugin is gone, no
-future session can spawn the daemon or re-create the Scheduled Task.
+future session can spawn the daemon.
 
 ## 7. Confirm
 

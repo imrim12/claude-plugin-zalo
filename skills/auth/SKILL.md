@@ -16,24 +16,14 @@ path anyway, so just use the path it gives you.) Confirm the login worked by sen
 a message, by `/zalo:status`, or by checking that `~/.claude/channels/zalo/credentials.json` now
 exists.
 
-## The 24/7 background task (Windows) — auto-installed
+## The background daemon
 
-A single always-on **daemon** owns the Zalo connection and logs every message to SQLite. The
-daemon **auto-installs** its Windows Scheduled Task on first boot (a logon-triggered,
-restart-on-failure task — no elevation needed, idempotent), so no-session 24/7 capture and
-auto-restart on crash/logon work with zero extra commands. Nothing to run by hand.
-
-If you ever need to inspect or remove it:
-
-```
-schtasks /query  /tn ClaudeZaloDaemon
-schtasks /delete /tn ClaudeZaloDaemon /f
-```
-
-Should the install ever fail (it logs to `daemon.log` and falls back automatically), the
-spawn-on-demand fallback still gives session-scoped operation — the task is only what adds
-no-session capture. (On macOS/Linux there is no Scheduled Task; the daemon runs via the spawn
-fallback for the life of your sessions.)
+A single **daemon** owns the Zalo connection and logs every message to SQLite. It is
+**spawn-on-demand**: the first Claude session that needs it launches it as a detached background
+process (no console window), and it stays running across later sessions until you reboot. There
+is nothing to install and no background task — the daemon lives and dies with your machine's
+uptime once a session has started it. (To fully remove the plugin and its state, use
+`/zalo:uninstall`.)
 
 ## Inbound delivery flag
 
