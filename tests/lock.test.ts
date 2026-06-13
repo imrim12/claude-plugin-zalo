@@ -1,15 +1,15 @@
 import { describe, test, expect, afterEach } from "bun:test";
-import { acquireDaemonLock, releaseDaemonLock } from "../src/core/lock.ts";
+import { lockCreate, lockDelete } from "../src/core/lock.ts";
 
-afterEach(() => releaseDaemonLock());
+afterEach(() => lockDelete());
 
 describe("daemon lock", () => {
   test("second acquire fails while held, succeeds after release", () => {
-    expect(acquireDaemonLock()).toBe(true);
+    expect(lockCreate()).toBe(true);
     // Same process already holds it — a re-acquire sees a live holder (us).
-    expect(acquireDaemonLock()).toBe(false);
-    releaseDaemonLock();
+    expect(lockCreate()).toBe(false);
+    lockDelete();
     // Now free again.
-    expect(acquireDaemonLock()).toBe(true);
+    expect(lockCreate()).toBe(true);
   });
 });

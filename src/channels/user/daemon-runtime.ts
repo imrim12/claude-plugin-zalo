@@ -2,19 +2,19 @@
 // notification — that's the proxy's job) and drain the outbound queue back out
 // through the single Zalo connection the daemon owns.
 import { ThreadType, Reactions, type Message, type SendMessageQuote, type TMessage } from 'zca-js'
-import { getApi } from './session.ts'
+import { sessionApi } from './session.ts'
 import { gate } from './gate.ts'
-import { toReaction } from './reactions.ts'
+import { reactionGet } from './reactions.ts'
 import {
   attachmentKind, attachmentHref, attachmentTitle, attachmentParams,
-  downloadToInbox, extFor, messageText, safeName,
+  attachmentDownload, attachmentExt, messageText, safeName,
 } from './attachments.ts'
 import {
-  insertMessage, takePendingOutbound, completeOutbound, getMessageByMsgId,
-  setMessageLocalPath, recordPermResponse, setMeta, type OutboundRow, type MessageRow,
-} from '../../core/db.ts'
-import { loadAccess } from '../../core/access.ts'
-import { beginQRLogin } from './session.ts'
+  messageCreate, outboundList, outboundUpdate, messageGet,
+  messageUpdate, permResponseCreate, metaUpdate, type OutboundRow, type MessageRow,
+} from '../../core/db/index.ts'
+import { accessGet } from '../../core/access.ts'
+import { sessionLoginQR } from './session.ts'
 import { log } from '../../utils/log.ts'
 
 // Pairing auto-replies must never answer something that itself looks like a
@@ -37,7 +37,7 @@ export async function ingest(message: Message): Promise<void> {
   if (result.action === 'pair') {
     if (PAIRING_SHAPE_RE.test(text)) return
     const lead = result.isResend ? 'Still pending' : 'Pairing required'
-    await getApi()?.sendMessage(`${lead} — run in Claude Code:\n\n/zalo:access pair ${result.code}`, message.threadId, message.type)
+    await sessionApi()?.sendMessage(`${lead} — run in Claude Code:\n\n/zalo:access pair ${result.code}`, message.threadId, message.type)
     return
   }
 
@@ -49,8 +49,8 @@ export async function ingest(message: Message): Promise<void> {
     const perm = PERMISSION_REPLY_RE.exec(text)
     if (perm) {
       const allow = perm[1]!.toLowerCase().startsWith('y')
-      recordPermResponse(perm[2]!.toLowerCase(), allow ? 'allow' : 'deny')
-      void getApi()?.addReaction(allow ? Reactions.OK : Reactions.NO, {
+      permResponseCreate(perm[2]!.toLowerCase(), allow ? 'allow' : 'deny')
+      void sessionApi()?.addReaction(allow ? Reactions.OK : Reactions.NO, {
         data: { msgId: message.data.msgId, cliMsgId: message.data.cliMsgId },
         threadId: message.threadId,
         type: message.type,
@@ -68,11 +68,11 @@ export async function ingest(message: Message): Promise<void> {
   // delivered. Observe-only messages store the href and download on demand.
   let localPath: string | undefined
   if (respond && kind === 'photo' && href) {
-    try { localPath = await downloadToInbox(href, extFor(message.data), message.data.msgId, attachmentParams(message.data)) }
+    try { localPath = await attachmentDownload(href, attachmentExt(message.data), message.data.msgId, attachmentParams(message.data)) }
     catch (err) { log(`photo download failed: ${err}`) }
   }
 
-  insertMessage({
+  messageCreate({
     msgId: message.data.msgId, cliMsgId: message.data.cliMsgId,
     chatId: message.threadId, threadType: message.type === ThreadType.Group ? 'group' : 'user',
     senderId: message.data.uidFrom, senderName: safeName(message.data.dName),
@@ -86,7 +86,7 @@ export async function ingest(message: Message): Promise<void> {
     localPath,
     ts: Number.isFinite(ts) ? ts : Date.now(), tsIso,
   })
-  setMeta('last_inbound_at', String(Date.now()))
+  metaUpdate('last_inbound_at', String(Date.now()))
 }
 
 function safeStringify(data: TMessage): string | undefined {
@@ -95,20 +95,20 @@ function safeStringify(data: TMessage): string | undefined {
 
 // ── OUTBOUND DRAIN: send queued actions via the single Zalo connection. ──
 export async function drainOutbound(): Promise<void> {
-  const api = getApi()
+  const api = sessionApi()
   if (!api) return                      // not logged in yet — leave rows pending
-  for (const o of takePendingOutbound()) {
+  for (const o of outboundList()) {
     try {
       const result = await execOutbound(o, api)
-      completeOutbound(o.id, 'sent', result,
+      outboundUpdate(o.id, 'sent', result,
         o.kind === 'reply' && o.chat_id && o.watermark_id != null ? { chatId: o.chat_id, watermarkId: o.watermark_id } : undefined)
     } catch (err) {
-      completeOutbound(o.id, 'failed', { error: err instanceof Error ? err.message : String(err) })
+      outboundUpdate(o.id, 'failed', { error: err instanceof Error ? err.message : String(err) })
     }
   }
 }
 
-async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof getApi>>): Promise<object> {
+async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof sessionApi>>): Promise<object> {
   const threadType = o.thread_type === 'group' ? ThreadType.Group : ThreadType.User
   switch (o.kind) {
     case 'reply': {
@@ -124,9 +124,9 @@ async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof g
       return { sentIds }
     }
     case 'react': {
-      const row = getMessageByMsgId(o.target_msg_id!)
+      const row = messageGet(o.target_msg_id!)
       if (!row?.msg_id || !row.cli_msg_id) throw new Error('message not found for react')
-      await api.addReaction(toReaction(o.emoji!), {
+      await api.addReaction(reactionGet(o.emoji!), {
         data: { msgId: row.msg_id, cliMsgId: row.cli_msg_id },
         threadId: row.chat_id,
         type: row.thread_type === 'group' ? ThreadType.Group : ThreadType.User,
@@ -134,21 +134,21 @@ async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof g
       return { reacted: true }
     }
     case 'download': {
-      const row = getMessageByMsgId(o.target_msg_id!)
+      const row = messageGet(o.target_msg_id!)
       if (!row?.att_href) throw new Error('message has no downloadable attachment')
       let path = row.local_path
       if (!path) {
-        path = await downloadToInbox(row.att_href, extForRow(row), row.msg_id!, row.att_params ?? undefined)
-        setMessageLocalPath(row.id, path)
+        path = await attachmentDownload(row.att_href, extForRow(row), row.msg_id!, row.att_params ?? undefined)
+        messageUpdate(row.id, path)
       }
       return { path }
     }
     case 'login': {
-      const qrPath = await beginQRLogin()
+      const qrPath = await sessionLoginQR()
       return { qrPath }
     }
     case 'permission_dm': {
-      const access = loadAccess()
+      const access = accessGet()
       const text = o.text!
       for (const chat of access.allowFrom) await api.sendMessage(text, chat, ThreadType.User).catch(e => log(`perm dm to ${chat} failed: ${e}`))
       return { sent: true }
@@ -161,7 +161,7 @@ async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof g
 // alone are insufficient (propertyExt/ttl aren't stored separately), so we keep
 // the full message.data as quote_json at ingest.
 function buildQuote(msgId: string): SendMessageQuote | undefined {
-  const row = getMessageByMsgId(msgId)
+  const row = messageGet(msgId)
   if (!row?.quote_json) return undefined
   try {
     const d = JSON.parse(row.quote_json) as TMessage
@@ -172,7 +172,7 @@ function buildQuote(msgId: string): SendMessageQuote | undefined {
   } catch { return undefined }
 }
 
-// extForRow mirrors extFor but reads the persisted att_title/att_href off a row.
+// extForRow mirrors attachmentExt but reads the persisted att_title/att_href off a row.
 function extForRow(row: MessageRow): string {
   const title = row.att_title
   if (title?.includes('.')) return title.split('.').pop()!

@@ -5,12 +5,12 @@
 // Groups are deliberately OPEN by design: the secretary observes (delivers +
 // logs) every group it's in, and only `respond`s when mentioned. An unknown
 // group is auto-registered with a default mention-gated policy (so it shows up
-// in /zalo:access and outbound replies pass assertAllowedChat) rather than
+// in /zalo:access and outbound replies pass accessAssertAllowed) rather than
 // dropped. Mute a group by setting its policy `observe: false`.
 import { randomBytes } from 'crypto'
 import { ThreadType, type Message } from 'zca-js'
-import { loadAccess, saveAccess, pruneExpired, type Access, type GroupPolicy } from '../../core/access.ts'
-import { getOwnId } from './session.ts'
+import { accessGet, accessUpdate, accessPruneExpired, type Access, type GroupPolicy } from '../../core/access.ts'
+import { sessionOwnId } from './session.ts'
 
 export type GateResult =
   // respond=false means "observe only": deliver + log for memory, but do not reply.
@@ -19,9 +19,9 @@ export type GateResult =
   | { action: 'pair'; code: string; isResend: boolean }
 
 export function gate(message: Message): GateResult {
-  const access = loadAccess()
-  const pruned = pruneExpired(access)
-  if (pruned) saveAccess(access)
+  const access = accessGet()
+  const pruned = accessPruneExpired(access)
+  if (pruned) accessUpdate(access)
 
   if (access.dmPolicy === 'disabled') return { action: 'drop' }
 
@@ -38,7 +38,7 @@ export function gate(message: Message): GateResult {
         // Reply twice max (initial + one reminder), then go silent.
         if ((p.replies ?? 1) >= 2) return { action: 'drop' }
         p.replies = (p.replies ?? 1) + 1
-        saveAccess(access)
+        accessUpdate(access)
         return { action: 'pair', code, isResend: true }
       }
     }
@@ -54,7 +54,7 @@ export function gate(message: Message): GateResult {
       expiresAt: now + 60 * 60 * 1000, // 1h
       replies: 1,
     }
-    saveAccess(access)
+    accessUpdate(access)
     return { action: 'pair', code, isResend: false }
   }
 
@@ -65,10 +65,10 @@ export function gate(message: Message): GateResult {
       // First message from a group we've never seen: auto-register it so the
       // secretary observes by default. Registering (vs. delivering ad-hoc)
       // makes the group visible to /zalo:access and lets outbound replies pass
-      // assertAllowedChat. Default = observe all senders, reply only on mention.
+      // accessAssertAllowed. Default = observe all senders, reply only on mention.
       policy = { requireMention: true, allowFrom: [], observe: true }
       access.groups[groupId] = policy
-      saveAccess(access)
+      accessUpdate(access)
     }
     // Muted group — the user opted it out via /zalo:access. Drop entirely.
     if (policy.observe === false) return { action: 'drop' }
@@ -88,7 +88,7 @@ export function gate(message: Message): GateResult {
 }
 
 function isMentioned(message: Message, extraPatterns?: string[]): boolean {
-  const ownId = getOwnId()
+  const ownId = sessionOwnId()
 
   // `mentions` only exists on group messages — narrow on type before reading.
   if (message.type === ThreadType.Group) {

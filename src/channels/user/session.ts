@@ -13,7 +13,7 @@ import {
   type API,
   type Message,
 } from 'zca-js'
-import { loadCredentials, saveCredentials } from './credentials.ts'
+import { credentialsGet, credentialsUpdate } from './credentials.ts'
 import { CREDENTIALS_FILE, QR_PATH, HOME_STATE_DIR } from '../../constants/paths.ts'
 import { log } from '../../utils/log.ts'
 
@@ -33,28 +33,28 @@ let reloginAttempt = 0
 type InboundHandler = (message: Message) => Promise<void>
 let onMessage: InboundHandler | null = null
 
-export function setInboundHandler(handler: InboundHandler): void {
+export function sessionOnInbound(handler: InboundHandler): void {
   onMessage = handler
 }
 
-export function getApi(): API | null {
+export function sessionApi(): API | null {
   return api
 }
 
-export function getOwnId(): string {
+export function sessionOwnId(): string {
   return ownId
 }
 
-export function isShuttingDown(): boolean {
+export function sessionShuttingDown(): boolean {
   return shuttingDown
 }
 
-export function markShuttingDown(): void {
+export function sessionClose(): void {
   shuttingDown = true
   try { api?.listener.stop() } catch { }
 }
 
-export function requireApi(): API {
+export function sessionRequireApi(): API {
   if (kicked) {
     throw new Error(
       'another Zalo session took over this account — close it, then run zalo_login or restart this session',
@@ -68,7 +68,7 @@ export function requireApi(): API {
 // process-healthy but its WebSocket is dead — make that observable instead of
 // hiding it. Derived from the same api/kicked/reloginAttempt state the listener
 // callbacks maintain.
-export function getWsState(): 'connected' | 'kicked' | 'reconnecting' | 'disconnected' {
+export function sessionState(): 'connected' | 'kicked' | 'reconnecting' | 'disconnected' {
   if (kicked) return 'kicked'
   if (api) return 'connected'
   if (reloginAttempt > 0) return 'reconnecting'
@@ -81,7 +81,7 @@ function wireApi(a: API): void {
   kicked = false
   reloginAttempt = 0
   ownId = a.getOwnId()
-  saveCredentials(a)
+  credentialsUpdate(a)
 
   a.listener.on('message', m => {
     if (!onMessage) return
@@ -123,7 +123,7 @@ function scheduleRelogin(): void {
   }
   const delay = Math.min(1000 * attempt, 15000)
   log(`re-login attempt ${attempt} in ${delay / 1000}s`)
-  setTimeout(() => { void cookieLogin() }, delay).unref()
+  setTimeout(() => { void sessionLogin() }, delay).unref()
 }
 
 // ── Test harness ────────────────────────────────────────────────────────────
@@ -169,10 +169,10 @@ function wireFakeApi(): void {
   }, 200).unref()
 }
 
-export async function cookieLogin(): Promise<void> {
+export async function sessionLogin(): Promise<void> {
   if (shuttingDown || kicked) return
   if (FAKE) { wireFakeApi(); return }
-  const creds = loadCredentials()
+  const creds = credentialsGet()
   if (!creds) {
     log(`no credentials at ${CREDENTIALS_FILE} — run zalo_login (QR scan) to connect`)
     return
@@ -191,7 +191,7 @@ export async function cookieLogin(): Promise<void> {
 // background and wires the listener + persists credentials when the user scans.
 let qrInFlight: Promise<string> | null = null
 
-export function beginQRLogin(): Promise<string> {
+export function sessionLoginQR(): Promise<string> {
   if (qrInFlight) return qrInFlight
   qrInFlight = new Promise<string>((resolve, reject) => {
     let qrShown = false

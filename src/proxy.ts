@@ -14,11 +14,11 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { randomBytes } from 'crypto'
 import { mcp } from './core/mcp.ts'
-import { db } from './core/db.ts'
-import { registerTools } from './handlers/tools.ts'
-import { registerPermissionRelay, startPermissionPoller } from './handlers/permissions.ts'
-import { startInboundPoller } from './handlers/inbound-poller.ts'
-import { ensureDaemon } from './core/daemon-ensure.ts'
+import { db } from './core/db/index.ts'
+import { toolsRegister } from './handlers/tools.ts'
+import { permissionRelay, permissionPoll } from './handlers/permissions.ts'
+import { inboundPoll } from './handlers/inbound-poller.ts'
+import { daemonEnsure } from './core/daemon-ensure.ts'
 import { log } from './utils/log.ts'
 
 const SESSION_ID = `${process.pid}-${randomBytes(3).toString('hex')}`
@@ -27,13 +27,13 @@ db()                                  // open shared DB (WAL)
 process.on('unhandledRejection', e => log(`unhandled rejection: ${e}`))
 process.on('uncaughtException', e => log(`uncaught exception: ${e}`))
 
-registerTools()
-registerPermissionRelay(SESSION_ID)
+toolsRegister()
+permissionRelay(SESSION_ID)
 await mcp.connect(new StdioServerTransport())
 
-void ensureDaemon()                   // bring the daemon up if it isn't (non-blocking)
-startInboundPoller(SESSION_ID)
-startPermissionPoller()
+void daemonEnsure()                   // bring the daemon up if it isn't (non-blocking)
+inboundPoll(SESSION_ID)
+permissionPoll()
 
 // Proxy dies with its session — no Zalo state to release, just stop cleanly. The daemon keeps
 // running.

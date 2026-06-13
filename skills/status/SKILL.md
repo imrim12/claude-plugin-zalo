@@ -16,7 +16,7 @@ The daemon publishes health into the DB `meta` table. Read it (resolve `<plugin>
 `$CLAUDE_PLUGIN_ROOT`):
 
 ```
-bun -e "import('<plugin>/src/core/db.ts').then(m=>{const g=m.getMeta;console.log(JSON.stringify({ws:g('ws_state'),heartbeat:g('heartbeat'),lastInbound:g('last_inbound_at'),started:g('started_at')},null,2))})"
+bun -e "import('<plugin>/src/core/db/index.ts').then(m=>{const g=m.metaGet;console.log(JSON.stringify({ws:g('ws_state'),heartbeat:g('heartbeat'),lastInbound:g('last_inbound_at'),started:g('started_at')},null,2))})"
 ```
 
 Interpret:

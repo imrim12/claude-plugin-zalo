@@ -2,14 +2,14 @@
 // the chat's unprocessed lead-up + a memory snippet, and emit a channel notification. The
 // atomic claim (db.ts UPDATE … RETURNING) is the "exactly one session answers" guarantee.
 import { mcp } from '../core/mcp.ts'
-import { claimInbound, type MessageRow } from '../core/db.ts'
-import { buildContext } from '../core/context.ts'
+import { messageClaim, type MessageRow } from '../core/db/index.ts'
+import { contextBuild } from '../core/context.ts'
 import { log } from '../utils/log.ts'
 
-export function startInboundPoller(sessionId: string): void {
+export function inboundPoll(sessionId: string): void {
   setInterval(() => {
     let rows: MessageRow[]
-    try { rows = claimInbound(sessionId, Date.now() - 60_000) } catch (e) { log(`claim failed: ${e}`); return }
+    try { rows = messageClaim(sessionId, Date.now() - 60_000) } catch (e) { log(`claim failed: ${e}`); return }
     for (const r of rows) void deliver(r)
   }, 1000).unref()
 }
@@ -18,7 +18,7 @@ async function deliver(r: MessageRow): Promise<void> {
   // The notification content is the triggering message PLUS the unprocessed lead-up of this
   // chat + a memory snippet, assembled server-side (a PreToolUse hook can't do this — it fires
   // after Claude already wrote the reply). This is the "feed previous chat" half.
-  const context = buildContext(r)
+  const context = contextBuild(r)
   await mcp.notification({
     method: 'notifications/claude/channel',
     params: {

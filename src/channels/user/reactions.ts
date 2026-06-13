@@ -25,7 +25,7 @@ const EMOJI_TO_REACTION: Record<string, Reactions> = {
 
 const REACTION_CODES = new Set<string>(Object.values(Reactions))
 
-export function toReaction(emoji: string): Reactions {
+export function reactionGet(emoji: string): Reactions {
   const mapped = EMOJI_TO_REACTION[emoji]
   if (mapped) return mapped
   if (REACTION_CODES.has(emoji)) return emoji as Reactions

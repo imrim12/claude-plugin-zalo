@@ -7,7 +7,7 @@ import { LOCK_FILE } from '../constants/paths.ts'
 
 let heldFd: number | null = null
 
-export function acquireDaemonLock(): boolean {
+export function lockCreate(): boolean {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       heldFd = openSync(LOCK_FILE, 'wx')      // atomic: fails if file exists
@@ -24,7 +24,7 @@ export function acquireDaemonLock(): boolean {
   return false
 }
 
-export function releaseDaemonLock(): void {
+export function lockDelete(): void {
   try { if (heldFd !== null) closeSync(heldFd) } catch { }
   try { if (readStalePid() === process.pid) rmSync(LOCK_FILE) } catch { }
   heldFd = null

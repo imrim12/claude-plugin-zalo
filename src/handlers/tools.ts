@@ -8,11 +8,11 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { randomBytes } from 'crypto'
 import { mcp } from '../core/mcp.ts'
-import { loadAccess, assertAllowedChat, MAX_CHUNK_LIMIT } from '../core/access.ts'
+import { accessGet, accessAssertAllowed, MAX_CHUNK_LIMIT } from '../core/access.ts'
 import { chunk } from '../utils/chunk.ts'
-import { enqueueOutbound, getOutbound, getMessageByMsgId } from '../core/db.ts'
+import { outboundCreate, outboundGet, messageGet } from '../core/db/index.ts'
 
-export function registerTools(): void {
+export function toolsRegister(): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
@@ -114,7 +114,7 @@ function idem(): string { return randomBytes(8).toString('hex') }
 async function awaitResult(id: number, timeoutMs = 15_000): Promise<{ status: string; result: unknown }> {
   const start = Date.now()
   for (;;) {
-    const row = getOutbound(id)
+    const row = outboundGet(id)
     if (row && row.status !== 'pending') return { status: row.status, result: row.result ? JSON.parse(row.result) : null }
     if (Date.now() - start > timeoutMs) throw new Error('daemon did not process the request in time (is it running? /zalo:status)')
     await Bun.sleep(150)
@@ -128,14 +128,14 @@ async function handleReply(args: Record<string, unknown>): Promise<ToolResult> {
   const reply_to = args.reply_to as string | undefined
   const watermark_id = args.watermark_id != null ? Number(args.watermark_id) : undefined
 
-  assertAllowedChat(chat_id)
-  const access = loadAccess()
+  accessAssertAllowed(chat_id)
+  const access = accessGet()
   const limit = Math.max(1, Math.min(access.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT))
   const chunks = chunk(text, limit, access.chunkMode ?? 'length')
   const replyMode = access.replyToMode ?? 'first'
   const quoteMsgId = reply_to && replyMode !== 'off' ? reply_to : undefined
 
-  const id = enqueueOutbound({
+  const id = outboundCreate({
     kind: 'reply', idem_key: idem(),
     chat_id, thread_type, watermark_id: watermark_id ?? null,
     payload: JSON.stringify({ chunks, quoteMsgId }),
@@ -150,9 +150,9 @@ async function handleReact(args: Record<string, unknown>): Promise<ToolResult> {
   const chat_id = args.chat_id as string
   const message_id = args.message_id as string
   const emoji = args.emoji as string
-  assertAllowedChat(chat_id)
+  accessAssertAllowed(chat_id)
 
-  const id = enqueueOutbound({
+  const id = outboundCreate({
     kind: 'react', idem_key: idem(),
     chat_id, target_msg_id: message_id, emoji,
   })
@@ -165,12 +165,12 @@ async function handleDownloadAttachment(args: Record<string, unknown>): Promise<
   const message_id = args.message_id as string
   // Gate the source chat too: a message seen before an allowlist revocation shouldn't stay
   // fetchable after it. The daemon logged every message, so look the row up for its chat_id.
-  const row = getMessageByMsgId(message_id)
+  const row = messageGet(message_id)
   if (!row) throw new Error(`message ${message_id} not found — the daemon has no record of it`)
-  assertAllowedChat(row.chat_id)
+  accessAssertAllowed(row.chat_id)
   if (!row.att_href) throw new Error(`message ${message_id} has no downloadable attachment`)
 
-  const id = enqueueOutbound({
+  const id = outboundCreate({
     kind: 'download', idem_key: idem(), target_msg_id: message_id,
   })
   const { status, result } = await awaitResult(id, 60_000)
@@ -179,7 +179,7 @@ async function handleDownloadAttachment(args: Record<string, unknown>): Promise<
 }
 
 async function handleZaloLogin(): Promise<ToolResult> {
-  const id = enqueueOutbound({ kind: 'login', idem_key: idem() })
+  const id = outboundCreate({ kind: 'login', idem_key: idem() })
   const { status, result } = await awaitResult(id, 30_000)
   if (status === 'failed') throw new Error((result as { error?: string })?.error ?? 'login failed')
   const qrPath = (result as { qrPath: string }).qrPath

@@ -12,6 +12,6 @@ Planned surface — mirror `channels/user/` so the rest of the app stays channel
 
 The shared pieces it will reuse as-is:
 
-- `core/access.ts` — access policy store + `assertAllowedChat` (channel-agnostic)
+- `core/access.ts` — access policy store + `accessAssertAllowed` (channel-agnostic)
 - `core/mcp.ts` — the MCP `Server` singleton
 - `constants/`, `utils/` — paths, logging, chunking

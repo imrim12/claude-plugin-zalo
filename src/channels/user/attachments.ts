@@ -4,7 +4,7 @@ import { writeFileSync, mkdirSync, readdirSync, statSync, rmSync } from 'fs'
 import { join } from 'path'
 import type { Message, TMessage } from 'zca-js'
 import { INBOX_DIR } from '../../constants/paths.ts'
-import { getApi } from './session.ts'
+import { sessionApi } from './session.ts'
 import { log } from '../../utils/log.ts'
 
 export function attachmentKind(msgType: string): string | undefined {
@@ -53,7 +53,7 @@ const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 // the jar's domain-scoped serializer (not a blind join of every cookie) sends
 // only what belongs to that host. Best-effort: no jar → no Cookie header.
 function cookieHeaderFor(url: string): string | undefined {
-  const api = getApi()
+  const api = sessionApi()
   if (!api) return undefined
   try {
     const s = api.getCookie().getCookieStringSync(url)
@@ -72,8 +72,8 @@ function maybeDecrypt(buf: Buffer, _params?: string): Buffer {
 
 // The inbox is where attachment BYTES land so Claude can Read them — it is
 // not chat history; inbound text only ever flows through channel notifications.
-export async function downloadToInbox(url: string, ext: string, idHint: string, params?: string): Promise<string> {
-  const api = getApi()
+export async function attachmentDownload(url: string, ext: string, idHint: string, params?: string): Promise<string> {
+  const api = sessionApi()
   const headers: Record<string, string> = {}
   if (api) headers['User-Agent'] = api.getContext().userAgent
   const cookie = cookieHeaderFor(url)
@@ -97,7 +97,7 @@ export async function downloadToInbox(url: string, ext: string, idHint: string, 
 // 24/7 accumulation guard (objection A12): drop inbox files older than maxAgeMs,
 // then enforce a total-size cap oldest-first. Called from the daemon's hourly
 // retention tick. Best-effort — a failed unlink just leaves the file for next pass.
-export function pruneInbox(maxAgeMs: number, maxBytes: number): void {
+export function attachmentPrune(maxAgeMs: number, maxBytes: number): void {
   let entries: Array<{ path: string; mtime: number; size: number }>
   try {
     entries = readdirSync(INBOX_DIR).map(name => {
@@ -126,7 +126,7 @@ export function pruneInbox(maxAgeMs: number, maxBytes: number): void {
   }
 }
 
-export function extFor(data: TMessage): string {
+export function attachmentExt(data: TMessage): string {
   const title = attachmentTitle(data)
   if (title?.includes('.')) return title.split('.').pop()!
   const href = attachmentHref(data)

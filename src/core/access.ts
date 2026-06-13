@@ -90,11 +90,11 @@ const BOOT_ACCESS: Access | null = STATIC
   })()
   : null
 
-export function loadAccess(): Access {
+export function accessGet(): Access {
   return BOOT_ACCESS ?? readAccessFile()
 }
 
-export function saveAccess(a: Access): void {
+export function accessUpdate(a: Access): void {
   if (STATIC) return
   mkdirSync(HOME_STATE_DIR, { recursive: true, mode: 0o700 })
   const tmp = ACCESS_FILE + '.tmp'
@@ -102,7 +102,7 @@ export function saveAccess(a: Access): void {
   renameSync(tmp, ACCESS_FILE)
 }
 
-export function pruneExpired(a: Access): boolean {
+export function accessPruneExpired(a: Access): boolean {
   const now = Date.now()
   let changed = false
   for (const [code, p] of Object.entries(a.pending)) {
@@ -116,8 +116,8 @@ export function pruneExpired(a: Access): boolean {
 
 // Outbound gate — reply/react can only target chats the inbound gate would
 // deliver from. Zalo DM threadId == peer userId, so allowFrom covers DMs.
-export function assertAllowedChat(chat_id: string): void {
-  const access = loadAccess()
+export function accessAssertAllowed(chat_id: string): void {
+  const access = accessGet()
   if (access.allowFrom.includes(chat_id)) return
   if (chat_id in access.groups) return
   throw new Error(`chat ${chat_id} is not allowlisted — add via /zalo:access`)

@@ -9,7 +9,7 @@
 //
 // Claude Code passes the hook a JSON event on stdin; for an MCP tool, tool_input
 // is the tool's arguments object.
-import { db } from '../src/core/db.ts'
+import { db } from '../src/core/db/index.ts'
 
 type HookEvent = { tool_input?: { chat_id?: string; watermark_id?: string } }
 

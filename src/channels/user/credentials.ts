@@ -14,7 +14,7 @@ export type StoredCredentials = {
   language?: string
 }
 
-export function loadCredentials(): StoredCredentials | null {
+export function credentialsGet(): StoredCredentials | null {
   try {
     const parsed = JSON.parse(readFileSync(CREDENTIALS_FILE, 'utf8')) as Partial<StoredCredentials>
     if (!parsed.imei || !parsed.userAgent || !parsed.cookie) return null
@@ -26,7 +26,7 @@ export function loadCredentials(): StoredCredentials | null {
 
 // Zalo rotates cookies on every login — re-persist after each successful one,
 // or the saved jar goes stale and the next cookie-login fails.
-export function saveCredentials(api: API): void {
+export function credentialsUpdate(api: API): void {
   const ctx = api.getContext()
   const jar = api.getCookie().toJSON()
   const creds: StoredCredentials = {

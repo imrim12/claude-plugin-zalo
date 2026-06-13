@@ -1,12 +1,12 @@
 import { describe, test, expect, afterEach } from "bun:test";
 import { ThreadType, type Message } from "zca-js";
 import { gate } from "../src/channels/user/gate.ts";
-import { loadAccess, saveAccess, type Access } from "../src/core/access.ts";
+import { accessGet, accessUpdate, type Access } from "../src/core/access.ts";
 
 // gate() reads/writes access.json under ZALO_STATE_DIR (set by tests/setup.ts),
 // so each test starts from a known access state and restores defaults after.
 function setAccess(partial: Partial<Access>): void {
-  saveAccess({
+  accessUpdate({
     dmPolicy: "pairing",
     allowFrom: [],
     groups: {},
@@ -85,7 +85,7 @@ describe("gate — groups are observe-by-default", () => {
     expect(r.action).toBe("deliver");
     if (r.action === "deliver") expect(r.respond).toBe(false);
     // auto-registered so /zalo:access can see it and outbound replies pass
-    expect(loadAccess().groups["g-new"]).toEqual({
+    expect(accessGet().groups["g-new"]).toEqual({
       requireMention: true,
       allowFrom: [],
       observe: true,

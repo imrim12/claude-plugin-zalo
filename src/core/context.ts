@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { unprocessedForChat, type MessageRow } from './db.ts'
+import { messageList, type MessageRow } from './db/index.ts'
 import { MEMORY_DIR } from '../constants/paths.ts'
 
 export type BuiltContext = { content: string; watermarkId: number }
@@ -8,8 +8,8 @@ export type BuiltContext = { content: string; watermarkId: number }
 // "Feed the recent memory + all the recent (unprocessed) messages as previous chat." The
 // unmentioned lead-up never woke the LLM, so it's pulled from the DB now and prefixed to the
 // triggering message. Memory snippet = the session's own summarized notes for this chat, if any.
-export function buildContext(trigger: MessageRow): BuiltContext {
-  const lead = unprocessedForChat(trigger.chat_id, trigger.id)   // includes the trigger row itself
+export function contextBuild(trigger: MessageRow): BuiltContext {
+  const lead = messageList(trigger.chat_id, trigger.id)   // includes the trigger row itself
   const watermarkId = lead.length ? lead[lead.length - 1]!.id : trigger.id
 
   const prior = lead.filter(m => m.id !== trigger.id)

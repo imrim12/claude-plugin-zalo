@@ -1,13 +1,13 @@
 import { spawn } from 'child_process'
 import { openSync } from 'fs'
 import { fileURLToPath } from 'url'
-import { getMeta } from './db.ts'
+import { metaGet } from './db/index.ts'
 import { DAEMON_LOG } from '../constants/paths.ts'
 import { log } from '../utils/log.ts'
 
 // Daemon liveness = a fresh heartbeat in meta (never trust a PID — objection A4). If stale, spawn
 // a detached daemon. The daemon is **spawn-on-demand only** — there is no Scheduled Task path.
-export async function ensureDaemon(): Promise<void> {
+export async function daemonEnsure(): Promise<void> {
   // Test guard: integration tests manage the daemon themselves (or don't need one) — never let a
   // spawned proxy fork a detached daemon that outlives the test and keeps the temp DB file open
   // (which would break temp-dir cleanup on Windows).
@@ -35,6 +35,6 @@ function spawnDaemon(): void {
 }
 
 function isFresh(): boolean {
-  const hb = Number(getMeta('heartbeat') ?? 0)
+  const hb = Number(metaGet('heartbeat') ?? 0)
   return Date.now() - hb < 15_000
 }

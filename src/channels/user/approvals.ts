@@ -5,11 +5,11 @@ import { readdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { ThreadType } from 'zca-js'
 import { APPROVED_DIR, STATIC } from '../../constants/paths.ts'
-import { getApi } from './session.ts'
+import { sessionApi } from './session.ts'
 import { log } from '../../utils/log.ts'
 
 function checkApprovals(): void {
-  const api = getApi()
+  const api = sessionApi()
   if (!api) return // not logged in yet — leave files for the next pass
   let files: string[]
   try {
@@ -32,7 +32,7 @@ function checkApprovals(): void {
   }
 }
 
-export function startApprovalPolling(): void {
+export function approvalPoll(): void {
   if (STATIC) return
   setInterval(checkApprovals, 5000).unref()
 }

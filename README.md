@@ -176,7 +176,7 @@ always-on **daemon** is `src/daemon.ts`. Two processes, one DB:
 |---|---|
 | `proxy.ts` | Per-session MCP server: claims inbound rows, enriches with context, emits channel notifications; tool calls enqueue `outbound` rows and poll for results; ensures the daemon is running |
 | `daemon.ts` / `channels/user/daemon-runtime.ts` | The single Zalo owner: login/listener, gate → write `messages` rows, drain the `outbound` queue, mark-processed on send, publish health |
-| `core/db.ts` | The SQLite bus: schema, atomic `claimInbound`, `outbound` queue, watermark mark-processed, retention |
+| `core/db/` | The SQLite bus (client + per-entity adapters): schema, atomic `messageClaim`, `outbound` queue, watermark mark-processed, retention |
 | `core/lock.ts` | Daemon single-instance lock (Zalo login happens only after the lock is held) |
 | `core/context.ts` | Builds the "previous chat" context block (unprocessed rows + memory) fed before answering |
 | `core/daemon-ensure.ts` | Heartbeat-based daemon liveness; spawns the detached daemon on demand |
