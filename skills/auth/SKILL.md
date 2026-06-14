@@ -25,28 +25,26 @@ is nothing to install and no background task — the daemon lives and dies with 
 uptime once a session has started it. (To fully remove the plugin and its state, use
 `/zalo:uninstall`.)
 
-## Inbound delivery: a flag AND an env var
+## Inbound delivery: just one flag
 
-After login, remind the user that **inbound** messages need TWO things on the session that should
-answer Zalo:
+After login, remind the user that the session which should **answer** Zalo must be launched with
+the dev-channel flag:
 
 ```
-# bash / macOS / Linux
-ZALO_INBOUND=1 claude --dangerously-load-development-channels plugin:zalo@imrim12
-
-# Windows PowerShell
-$env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12
+claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
-1. **`--dangerously-load-development-channels plugin:zalo@imrim12`** — without it, Claude Code
-   silently drops incoming Zalo notifications (the plugin isn't on the built-in approved-channels
-   allowlist). Outbound tools still work, which makes the failure look like a server bug.
-2. **`ZALO_INBOUND=1`** — marks this session as the responder. Only an opted-in session claims
-   inbound messages from the shared queue. This matters when you have **other Claude sessions
-   open** (different projects): every session runs a Zalo proxy, and without this gate any of them
-   could grab an incoming message and black-hole it (it has no channel flag, so Claude Code drops
-   the notification and no other session ever sees it). Set `ZALO_INBOUND=1` on exactly the one
-   session you want to answer from; the others need no change.
+**`--dangerously-load-development-channels plugin:zalo@imrim12`** — without it, Claude Code silently
+drops incoming Zalo notifications (the plugin isn't on the built-in approved-channels allowlist).
+Outbound tools still work, which makes the failure look like a server bug. This is the *only*
+launch requirement: the proxy reads this flag off the launching `claude` process and **enables
+inbound for that session automatically** — so the session that renders Zalo notifications is also
+the one that claims them, even with other Claude sessions open in different projects.
 
-If inbound seems dead, check the proxy log line on connect: `inbound enabled (ZALO_INBOUND)` vs
-`inbound disabled — set ZALO_INBOUND=1 …` confirms whether this session is claiming.
+**Optional override — `ZALO_INBOUND`.** Auto-detection covers the normal case. Set
+`ZALO_INBOUND=1` to *force* a session to answer (e.g. an unusual launch where the flag isn't on the
+command line), or `ZALO_INBOUND=0` to force one to stay silent. An explicit value always wins over
+auto-detection.
+
+If inbound seems dead, check the proxy log line on connect: `inbound enabled (…)` vs
+`inbound disabled (…)` reports the decision and why.

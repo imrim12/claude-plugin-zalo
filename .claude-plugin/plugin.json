@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "zalo",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Send and receive Zalo messages from Claude Code",
   "author": {
     "name": "Nguyen Huu Nguyen Y",

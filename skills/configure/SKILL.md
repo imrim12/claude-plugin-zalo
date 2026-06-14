@@ -30,19 +30,19 @@ Arguments passed: `$ARGUMENTS`
    user-root, not project-local). If not, the next step is `/zalo:auth` (QR scan). Stop there —
    access policy means nothing while logged out.
 
-2. **Inbound delivery** — the session that should answer Zalo needs BOTH the channel flag and
-   the `ZALO_INBOUND=1` env var:
+2. **Inbound delivery** — the session that should answer Zalo just needs the channel flag:
 
    ```
-   # PowerShell
-   $env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12
+   claude --dangerously-load-development-channels plugin:zalo@imrim12
    ```
 
    - Without `--dangerously-load-development-channels`, Claude Code silently drops inbound
      messages (the plugin is not on the built-in approved-channels allowlist).
-   - Without `ZALO_INBOUND=1`, this session won't claim inbound at all — and if you have other
-     Claude sessions open, one of *them* may grab the message and black-hole it. Set it on the
-     one responder session; the others need nothing.
+   - The proxy reads that flag off the launching `claude` process and **auto-enables inbound for
+     that session** — so the session that renders notifications is also the one that claims them,
+     even with other Claude sessions open. No env var to set.
+   - Optional override: `ZALO_INBOUND=1` forces a session to answer, `ZALO_INBOUND=0` forces it
+     silent (explicit value wins over auto-detection).
 
    Tell the user — outbound tools working is NOT evidence inbound is enabled.
 

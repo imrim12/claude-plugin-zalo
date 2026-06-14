@@ -19,6 +19,7 @@ import { toolsRegister } from './handlers/tools.ts'
 import { permissionRelay, permissionPoll } from './handlers/permissions.ts'
 import { inboundPoll } from './handlers/inbound-poller.ts'
 import { daemonEnsure } from './core/daemon-ensure.ts'
+import { inboundDecide } from './core/render-detect.ts'
 import { log } from './utils/log.ts'
 
 const SESSION_ID = `${process.pid}-${randomBytes(3).toString('hex')}`
@@ -33,27 +34,20 @@ await mcp.connect(new StdioServerTransport())
 
 void daemonEnsure()                   // bring the daemon up if it isn't (non-blocking)
 
-// Only a session explicitly marked as the Zalo responder claims inbound messages.
-// Claude Code never tells a plugin whether the session was launched with
-// --dangerously-load-development-channels, and advertises identical MCP capabilities + env
-// either way — so a proxy cannot auto-detect whether ITS client will actually render channel
-// notifications. Without this gate, every concurrent Claude session (including unrelated
-// projects with no channel flag) races to claim each inbound row via the atomic messageClaim;
-// a session whose client silently drops channel notifications would "win" the claim and
-// black-hole the message. ZALO_INBOUND makes the answering session deterministic and opt-in.
-if (inboundEnabled()) {
-  log('inbound enabled (ZALO_INBOUND) — this session answers Zalo messages')
+// Only a session whose Claude Code client actually RENDERS Zalo channel notifications should claim
+// inbound messages — otherwise it would win the atomic messageClaim against the real responder and
+// black-hole the message (its client silently drops the notification). The launch flag
+// --dangerously-load-development-channels is what makes a client render, and it lives on the parent
+// `claude` process's command line, so inboundDecide() reads the ancestor chain and turns inbound on
+// by itself. An explicit ZALO_INBOUND still overrides (force on/off). See core/render-detect.ts.
+const inbound = inboundDecide()
+if (inbound.on) {
+  log(`inbound enabled (${inbound.reason}) — this session answers Zalo messages`)
   inboundPoll(SESSION_ID)
 } else {
-  log('inbound disabled — set ZALO_INBOUND=1 (alongside --dangerously-load-development-channels) to make this session answer Zalo')
+  log(`inbound disabled (${inbound.reason}) — launch with --dangerously-load-development-channels plugin:zalo@imrim12 to answer Zalo, or set ZALO_INBOUND=1`)
 }
 permissionPoll()
-
-// A session claims inbound only when opted in via ZALO_INBOUND (truthy, not '0'/'false').
-function inboundEnabled(): boolean {
-  const v = process.env.ZALO_INBOUND
-  return v != null && v !== '' && v !== '0' && v.toLowerCase() !== 'false'
-}
 
 // Proxy dies with its session — no Zalo state to release, just stop cleanly. The daemon keeps
 // running.

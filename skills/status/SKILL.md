@@ -51,30 +51,28 @@ count, pending pairing codes. If pending > 0, mention `/zalo:access` to review t
 
 ## 5. Inbound delivery (the most common "everything works but nothing shows up")
 
-Two independent requirements on the session meant to ANSWER Zalo:
+The session meant to ANSWER Zalo needs the channel flag:
 
-**(a) The channel flag.** Claude Code only renders channel notifications from plugins on its
+**The channel flag.** Claude Code only renders channel notifications from plugins on its
 approved allowlist; this plugin needs the session launched with
 `--dangerously-load-development-channels plugin:zalo@imrim12`. To confirm a drop, check the newest
 file in the MCP log dir (`%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`)
 for `Channel notifications skipped: … not in --channels list for this session`.
 
-**(b) `ZALO_INBOUND=1`.** Only a session launched with this env var claims inbound messages. With
-several Claude sessions open (other projects), each runs a Zalo proxy and they race to claim each
-incoming message via an atomic DB update; a session without the channel flag that wins the claim
-**black-holes** the message (Claude Code drops its notification, and no other session re-claims
-it). So the symptom is intermittent: DMs sometimes arrive, sometimes vanish, depending on which
-session won. Fix: launch the ONE responder session with both the flag and `ZALO_INBOUND=1`:
-
 ```
-# PowerShell
-$env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12
+claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
-Confirm via that session's proxy log on connect: `inbound enabled (ZALO_INBOUND)` (good) vs
-`inbound disabled — set ZALO_INBOUND=1 …` (this session won't answer). To check whether messages
-are being claimed but not rendered, inspect the DB: a row with `should_reply=1` and a non-null
-`delivered_to` that never gets `processed=1` was claimed by a session that couldn't show it.
-Daemon-side events live in `~/.claude/channels/zalo/daemon.log`.
+That flag is enough. The proxy reads it off the launching `claude` process and **auto-enables
+inbound for that session** — so the session that renders notifications is also the one that claims
+them. With several Claude sessions open (other projects), only the flagged one claims, so no
+unflagged session can win the claim race and **black-hole** the message. (Optional override:
+`ZALO_INBOUND=1` forces a session on, `ZALO_INBOUND=0` forces it off — an explicit value wins.)
+
+Confirm via that session's proxy log on connect: `inbound enabled (…)` (good) vs
+`inbound disabled (…)` (this session won't answer) — the line states the decision and why. To
+check whether messages are being claimed but not rendered, inspect the DB: a row with
+`should_reply=1` and a non-null `delivered_to` that never gets `processed=1` was claimed by a
+session that couldn't show it. Daemon-side events live in `~/.claude/channels/zalo/daemon.log`.
 
 Summarize each point clearly and end with the single most relevant next step.

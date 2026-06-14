@@ -82,29 +82,33 @@ failure look like a server bug. Diagnose via the client log line `Channel notifi
 skipped: plugin zalo@imrim12 is not on the approved channels allowlist` in
 `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`.
 
-## Inbound delivery also requires `ZALO_INBOUND=1` (responder opt-in)
+## Inbound delivery: which session answers (auto-detected, no env var)
 
-The flag above is **client-side and per-session**, and Claude Code never surfaces it to the
-plugin — a proxy advertises identical MCP capabilities and env whether or not the flag is set
-(verified empirically), so it **cannot** auto-detect whether its own client will render channel
-notifications. Yet the inbound poller's atomic `messageClaim` hands each row to exactly one of
-*all* concurrently-running proxies. With several Claude sessions open (other projects, no flag),
-an unflagged session would win the claim and **black-hole** the message: its client silently
-drops the notification, the row is marked delivered, and the flagged session never sees it.
+The dev-channel flag is **client-side and per-session**, and Claude Code never surfaces it to the
+plugin *through env or MCP capabilities* — a proxy advertises identical capabilities and env
+whether or not the flag is set. Yet the inbound poller's atomic `messageClaim` hands each row to
+exactly one of *all* concurrently-running proxies, so if an unflagged session (another project)
+wins the claim it **black-holes** the message: its client silently drops the notification, the row
+is marked delivered, and the flagged session never sees it. The responder must therefore be the
+session whose client actually renders Zalo notifications.
 
-So the answering session must **also** be launched with `ZALO_INBOUND=1`. Only a proxy with that
-env var set (truthy, not `0`/`false`) starts `inboundPoll` and claims rows; every other session
-ignores inbound entirely (outbound tools, permission relay, and the daemon spawn still work).
-Custom env vars pass through Claude Code to the spawned MCP server (verified), so:
+That flag *is* discoverable, just not where we first looked: it lives on the launching `claude`
+process's **command line** (`--dangerously-load-development-channels …plugin:zalo…`). So the proxy
+walks its own ancestor process chain at startup (`core/render-detect.ts`, `inboundDecide()`) and
+enables inbound iff a `claude` ancestor carries the flag — the rendering session auto-elects itself
+as the responder. No second launch token; the user runs only:
 
 ```
-ZALO_INBOUND=1 claude --dangerously-load-development-channels plugin:zalo@imrim12   # bash
-$env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12   # PowerShell
+claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
-If **no** open session sets `ZALO_INBOUND`, inbound is silently inert — the proxy logs `inbound
-disabled — set ZALO_INBOUND=1 …` on connect. This is the single deliberate "you must opt a
-session in" step; it is what makes which session answers deterministic instead of a claim race.
+`ZALO_INBOUND` remains an **explicit override**: set (truthy) forces inbound on, `0`/`false` forces
+it off, and an explicit value always wins over auto-detection (used by power users running several
+responders, and by tests). The proxy logs its decision on connect: `inbound enabled (<reason>)` or
+`inbound disabled (<reason>)`. Detection is fail-closed — any probe error → inbound off (never a
+false positive that would black-hole a message). The Windows probe runs one `windowsHide` PowerShell
+CIM query; Linux reads `/proc`; macOS runs one `ps`. Auto-detection is skipped under
+`ZALO_NO_DAEMON_SPAWN=1` (tests) so the suite never shells out.
 
 ## How to run and verify
 
@@ -148,7 +152,8 @@ helpers) owns no single entity and is exempt.
 | File | Responsibility |
 |---|---|
 | `server.ts` | Entry shim — imports `src/proxy.ts`. Kept at root so `.mcp.json`, `pnpm start`, and tests keep spawning `bun server.ts`. |
-| `src/proxy.ts` | **The per-session proxy.** MCP connect + lifecycle; opens the shared DB; starts the permission poller + `daemonEnsure()`; starts the inbound poller **only when `ZALO_INBOUND` is set** (responder opt-in — see "Inbound delivery also requires `ZALO_INBOUND=1`"). Dies with its session — no Zalo state to release. |
+| `src/proxy.ts` | **The per-session proxy.** MCP connect + lifecycle; opens the shared DB; starts the permission poller + `daemonEnsure()`; starts the inbound poller **only when this session renders Zalo notifications** (auto-detected via `inboundDecide()`, `ZALO_INBOUND` overrides — see "Inbound delivery: which session answers"). Dies with its session — no Zalo state to release. |
+| `src/core/render-detect.ts` | `inboundDecide()` — decides whether THIS proxy claims inbound: explicit `ZALO_INBOUND` wins, else auto-detect the dev-channel flag on the parent `claude` process's command line (walks the ancestor chain; `/proc` on Linux, one `windowsHide` PowerShell CIM query on Windows, one `ps` on macOS). Fail-closed; skipped under `ZALO_NO_DAEMON_SPAWN`. |
 | `src/daemon.ts` | **The always-on daemon.** Acquires the single-instance lock, opens DB, injects `ingest` into the session, cookie-login, heartbeat/health, outbound drain loop, retention. NOT unref'd (must block exit). |
 | **`src/constants/`** | |
 | `constants/paths.ts` | Account-global path constants (`HOME_STATE_DIR`, `DB_FILE`, `LOCK_FILE`, `DAEMON_LOG`, `ACCESS_FILE`, `INBOX_DIR`); `MEMORY_DIR` (project-local, for context enrichment); `STATIC` flag; mkdir side effect. |
@@ -221,10 +226,12 @@ the daemon drains and poll `outboundGet` for the result (a poll timeout means th
   freely (WAL) and write `outbound`/`perm_*` rows; SQLite serializes writers via `busy_timeout`.
 - **Atomic `messageClaim` (UPDATE…RETURNING) is the exactly-once guarantee** — two proxies
   polling concurrently get disjoint row sets. Never add an owner-election / broadcast path.
-- **Only `ZALO_INBOUND`-opted-in proxies claim inbound.** The dev-channel flag is client-side
-  and invisible to the plugin, so an unflagged session (e.g. another project) would otherwise win
-  the claim race and black-hole the message (its client drops the notification). The env gate
-  makes the answering session explicit. Never make inbound claim default-on for every proxy.
+- **Only proxies whose client renders Zalo notifications claim inbound.** An unflagged session
+  (e.g. another project) that won the claim race would black-hole the message (its client drops the
+  notification). `inboundDecide()` (`core/render-detect.ts`) auto-detects the rendering session by
+  reading the dev-channel flag off the parent `claude` process's command line; `ZALO_INBOUND`
+  overrides (force on/off). Detection is fail-closed. Never make inbound claim default-on for every
+  proxy regardless of whether its client renders — that reintroduces the black-hole.
 - **Mark-processed is watermark-scoped** (`WHERE id <= watermark`), in the SAME transaction as
   the outbound status flip — never an open-ended `WHERE processed=0` (a message arriving between
   send and mark would be swallowed). The proxy passes the watermark from the notification meta.
