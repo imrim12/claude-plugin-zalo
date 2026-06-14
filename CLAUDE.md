@@ -82,6 +82,30 @@ failure look like a server bug. Diagnose via the client log line `Channel notifi
 skipped: plugin zalo@imrim12 is not on the approved channels allowlist` in
 `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-zalo-zalo\`.
 
+## Inbound delivery also requires `ZALO_INBOUND=1` (responder opt-in)
+
+The flag above is **client-side and per-session**, and Claude Code never surfaces it to the
+plugin — a proxy advertises identical MCP capabilities and env whether or not the flag is set
+(verified empirically), so it **cannot** auto-detect whether its own client will render channel
+notifications. Yet the inbound poller's atomic `messageClaim` hands each row to exactly one of
+*all* concurrently-running proxies. With several Claude sessions open (other projects, no flag),
+an unflagged session would win the claim and **black-hole** the message: its client silently
+drops the notification, the row is marked delivered, and the flagged session never sees it.
+
+So the answering session must **also** be launched with `ZALO_INBOUND=1`. Only a proxy with that
+env var set (truthy, not `0`/`false`) starts `inboundPoll` and claims rows; every other session
+ignores inbound entirely (outbound tools, permission relay, and the daemon spawn still work).
+Custom env vars pass through Claude Code to the spawned MCP server (verified), so:
+
+```
+ZALO_INBOUND=1 claude --dangerously-load-development-channels plugin:zalo@imrim12   # bash
+$env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12   # PowerShell
+```
+
+If **no** open session sets `ZALO_INBOUND`, inbound is silently inert — the proxy logs `inbound
+disabled — set ZALO_INBOUND=1 …` on connect. This is the single deliberate "you must opt a
+session in" step; it is what makes which session answers deterministic instead of a claim race.
+
 ## How to run and verify
 
 ```sh
@@ -124,7 +148,7 @@ helpers) owns no single entity and is exempt.
 | File | Responsibility |
 |---|---|
 | `server.ts` | Entry shim — imports `src/proxy.ts`. Kept at root so `.mcp.json`, `pnpm start`, and tests keep spawning `bun server.ts`. |
-| `src/proxy.ts` | **The per-session proxy.** MCP connect + lifecycle; opens the shared DB; starts the inbound poller + permission poller; `daemonEnsure()`. Dies with its session — no Zalo state to release. |
+| `src/proxy.ts` | **The per-session proxy.** MCP connect + lifecycle; opens the shared DB; starts the permission poller + `daemonEnsure()`; starts the inbound poller **only when `ZALO_INBOUND` is set** (responder opt-in — see "Inbound delivery also requires `ZALO_INBOUND=1`"). Dies with its session — no Zalo state to release. |
 | `src/daemon.ts` | **The always-on daemon.** Acquires the single-instance lock, opens DB, injects `ingest` into the session, cookie-login, heartbeat/health, outbound drain loop, retention. NOT unref'd (must block exit). |
 | **`src/constants/`** | |
 | `constants/paths.ts` | Account-global path constants (`HOME_STATE_DIR`, `DB_FILE`, `LOCK_FILE`, `DAEMON_LOG`, `ACCESS_FILE`, `INBOX_DIR`); `MEMORY_DIR` (project-local, for context enrichment); `STATIC` flag; mkdir side effect. |
@@ -197,6 +221,10 @@ the daemon drains and poll `outboundGet` for the result (a poll timeout means th
   freely (WAL) and write `outbound`/`perm_*` rows; SQLite serializes writers via `busy_timeout`.
 - **Atomic `messageClaim` (UPDATE…RETURNING) is the exactly-once guarantee** — two proxies
   polling concurrently get disjoint row sets. Never add an owner-election / broadcast path.
+- **Only `ZALO_INBOUND`-opted-in proxies claim inbound.** The dev-channel flag is client-side
+  and invisible to the plugin, so an unflagged session (e.g. another project) would otherwise win
+  the claim race and black-hole the message (its client drops the notification). The env gate
+  makes the answering session explicit. Never make inbound claim default-on for every proxy.
 - **Mark-processed is watermark-scoped** (`WHERE id <= watermark`), in the SAME transaction as
   the outbound status flip — never an open-ended `WHERE processed=0` (a message arriving between
   send and mark would be swallowed). The proxy passes the watermark from the notification meta.

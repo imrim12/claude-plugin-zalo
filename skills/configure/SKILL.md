@@ -30,16 +30,21 @@ Arguments passed: `$ARGUMENTS`
    user-root, not project-local). If not, the next step is `/zalo:auth` (QR scan). Stop there —
    access policy means nothing while logged out.
 
-2. **Inbound delivery** — channel notifications from this plugin only render if Claude Code
-   was launched with:
+2. **Inbound delivery** — the session that should answer Zalo needs BOTH the channel flag and
+   the `ZALO_INBOUND=1` env var:
 
    ```
-   claude --dangerously-load-development-channels plugin:zalo@imrim12
+   # PowerShell
+   $env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12
    ```
 
-   Without it, Claude Code silently drops inbound messages (the plugin is not on the
-   built-in approved-channels allowlist). Tell the user — outbound tools working is NOT
-   evidence inbound is enabled.
+   - Without `--dangerously-load-development-channels`, Claude Code silently drops inbound
+     messages (the plugin is not on the built-in approved-channels allowlist).
+   - Without `ZALO_INBOUND=1`, this session won't claim inbound at all — and if you have other
+     Claude sessions open, one of *them* may grab the message and black-hole it. Set it on the
+     one responder session; the others need nothing.
+
+   Tell the user — outbound tools working is NOT evidence inbound is enabled.
 
 3. **Access** — read `~/.claude/channels/zalo/access.json` (missing = defaults:
    `dmPolicy: "pairing"`, empty allowlist). Show:

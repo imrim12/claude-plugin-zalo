@@ -25,14 +25,28 @@ is nothing to install and no background task — the daemon lives and dies with 
 uptime once a session has started it. (To fully remove the plugin and its state, use
 `/zalo:uninstall`.)
 
-## Inbound delivery flag
+## Inbound delivery: a flag AND an env var
 
-After login, remind the user: **inbound** messages only render in the session if Claude Code was
-launched with channel delivery enabled for this plugin:
+After login, remind the user that **inbound** messages need TWO things on the session that should
+answer Zalo:
 
 ```
-claude --dangerously-load-development-channels plugin:zalo@imrim12
+# bash / macOS / Linux
+ZALO_INBOUND=1 claude --dangerously-load-development-channels plugin:zalo@imrim12
+
+# Windows PowerShell
+$env:ZALO_INBOUND=1; claude --dangerously-load-development-channels plugin:zalo@imrim12
 ```
 
-Without it, outbound tools work but incoming Zalo messages are silently dropped by Claude Code
-(the plugin is not on the built-in approved-channels allowlist).
+1. **`--dangerously-load-development-channels plugin:zalo@imrim12`** — without it, Claude Code
+   silently drops incoming Zalo notifications (the plugin isn't on the built-in approved-channels
+   allowlist). Outbound tools still work, which makes the failure look like a server bug.
+2. **`ZALO_INBOUND=1`** — marks this session as the responder. Only an opted-in session claims
+   inbound messages from the shared queue. This matters when you have **other Claude sessions
+   open** (different projects): every session runs a Zalo proxy, and without this gate any of them
+   could grab an incoming message and black-hole it (it has no channel flag, so Claude Code drops
+   the notification and no other session ever sees it). Set `ZALO_INBOUND=1` on exactly the one
+   session you want to answer from; the others need no change.
+
+If inbound seems dead, check the proxy log line on connect: `inbound enabled (ZALO_INBOUND)` vs
+`inbound disabled — set ZALO_INBOUND=1 …` confirms whether this session is claiming.

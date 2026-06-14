@@ -32,8 +32,28 @@ permissionRelay(SESSION_ID)
 await mcp.connect(new StdioServerTransport())
 
 void daemonEnsure()                   // bring the daemon up if it isn't (non-blocking)
-inboundPoll(SESSION_ID)
+
+// Only a session explicitly marked as the Zalo responder claims inbound messages.
+// Claude Code never tells a plugin whether the session was launched with
+// --dangerously-load-development-channels, and advertises identical MCP capabilities + env
+// either way — so a proxy cannot auto-detect whether ITS client will actually render channel
+// notifications. Without this gate, every concurrent Claude session (including unrelated
+// projects with no channel flag) races to claim each inbound row via the atomic messageClaim;
+// a session whose client silently drops channel notifications would "win" the claim and
+// black-hole the message. ZALO_INBOUND makes the answering session deterministic and opt-in.
+if (inboundEnabled()) {
+  log('inbound enabled (ZALO_INBOUND) — this session answers Zalo messages')
+  inboundPoll(SESSION_ID)
+} else {
+  log('inbound disabled — set ZALO_INBOUND=1 (alongside --dangerously-load-development-channels) to make this session answer Zalo')
+}
 permissionPoll()
+
+// A session claims inbound only when opted in via ZALO_INBOUND (truthy, not '0'/'false').
+function inboundEnabled(): boolean {
+  const v = process.env.ZALO_INBOUND
+  return v != null && v !== '' && v !== '0' && v.toLowerCase() !== 'false'
+}
 
 // Proxy dies with its session — no Zalo state to release, just stop cleanly. The daemon keeps
 // running.
