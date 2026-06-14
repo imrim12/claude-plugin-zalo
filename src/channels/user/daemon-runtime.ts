@@ -96,8 +96,12 @@ function safeStringify(data: TMessage): string | undefined {
 // ── OUTBOUND DRAIN: send queued actions via the single Zalo connection. ──
 export async function drainOutbound(): Promise<void> {
   const api = sessionApi()
-  if (!api) return                      // not logged in yet — leave rows pending
   for (const o of outboundList()) {
+    // `login` is the bootstrap that ESTABLISHES the connection, so it must drain
+    // even before we have an api — it's the one flow that runs while logged out.
+    // Every other kind needs the live connection: leave those pending until login
+    // wires it (never gate the whole loop on `api`, or first-time login deadlocks).
+    if (o.kind !== 'login' && !api) continue
     try {
       const result = await execOutbound(o, api)
       outboundUpdate(o.id, 'sent', result,
@@ -108,7 +112,13 @@ export async function drainOutbound(): Promise<void> {
   }
 }
 
-async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof sessionApi>>): Promise<object> {
+async function execOutbound(o: OutboundRow, api: ReturnType<typeof sessionApi>): Promise<object> {
+  // Handled before the api guard: login is what produces the api in the first place.
+  if (o.kind === 'login') {
+    const qrPath = await sessionLoginQR()
+    return { qrPath }
+  }
+  if (!api) throw new Error('Zalo not logged in — run zalo_login (QR scan) first')
   const threadType = o.thread_type === 'group' ? ThreadType.Group : ThreadType.User
   switch (o.kind) {
     case 'reply': {
@@ -142,10 +152,6 @@ async function execOutbound(o: OutboundRow, api: NonNullable<ReturnType<typeof s
         messageUpdate(row.id, path)
       }
       return { path }
-    }
-    case 'login': {
-      const qrPath = await sessionLoginQR()
-      return { qrPath }
     }
     case 'permission_dm': {
       const access = accessGet()
